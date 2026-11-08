@@ -3,10 +3,13 @@
 1. generate.py runs on every example config (catches syntax/runtime breakage).
 2. Freshly generated formulas match the shipped, recalculated workbooks.
 3. check_workbook.py --skip-recalc PASSes on the shipped workbooks (they carry caches).
+   Its live-input tests recalculate with LibreOffice, so this is skipped if `soffice`
+   is not on PATH (the CI workflow installs it).
 4. check_workbook.py FAILs on a fresh, uncached workbook (empty-cache guard).
 
-Full recalculation + --regression needs LibreOffice; run it locally (see README).
+The slower --regression mutation run is left to local use (see README).
 """
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -59,6 +62,7 @@ def test_generated_formulas_match_shipped(generated, name):
     assert not diffs, diffs[:20]
 
 
+@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice (soffice) not installed")
 @pytest.mark.parametrize("name", list(CASES))
 def test_checker_passes_on_shipped(name):
     res = _run("scripts/check_workbook.py", CASES[name], "--config", _config(name), "--skip-recalc")
