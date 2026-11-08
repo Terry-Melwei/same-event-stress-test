@@ -1,0 +1,107 @@
+# ILLUSTRATIVE specialty apparel retailer — invented issuer, not a real company.
+meta:
+  title: "Harbor Lane Apparel — ILLUSTRATIVE same-event stress test"
+  company_label: "Harbor Lane Apparel (ILLUSTRATIVE)"
+  notes: "Draft, not investment advice. Second event is a proper tariff/input-cost bridge (not a commodity revenue proxy)."
+
+inputs:
+  revenue_y0: 800.0
+  revenue_growth: 0.04
+  opex_pct_of_revenue: 0.70
+  tax_rate: 0.25
+  da_pct_of_revenue: 0.03
+  capex_pct_of_revenue: 0.04
+  nwc_pct_of_delta_revenue: 0.12
+  royalty_rate: 0.00
+  commodity_price_index: 100.0
+  commodity_shock: -0.20
+  risk_free_rate: 0.04
+  equity_risk_premium: 0.05
+  beta: 1.0
+  pre_tax_cost_of_debt: 0.045
+  debt_weight: 0.15
+  equity_weight: 0.85
+  rate_shock_bp: 100
+  wacc_override: null
+  terminal_growth: 0.025
+  exit_ebitda_multiple: 9.0
+  gross_debt: 120.0
+  cash: 40.0
+  floating_debt_share: 0.50
+  fixed_debt_duration_years: 3.0
+  diluted_shares_million: 40.0
+  base_buyback_cash: 15.0
+  cost_elasticity: 0.0
+  capex_price_elasticity: 0.0
+
+events:
+  rates:
+    enabled: true
+    label: "Interest rates ±100 bp"
+  commodity:
+    enabled: false
+    label: "Commodity (disabled)"
+  tariff:
+    enabled: true
+    label: "Tariff / input-cost FULL"
+
+tariff:
+  units: 20.0                 # 20 × $40 ≈ $800m revenue year-0
+  price: 40.0
+  unit_cost: 18.0
+  fixed_cost: 150.0           # $m; separate from unit cost
+  cost_shock_pct: 0.15
+  pass_through_pct: 0.60      # <100% so +cost lowers equity
+  elasticity: -0.30
+  markdown_pct: 0.0
+  mitigation_pct: 0.0
+
+passthrough:
+  units: 2000.0
+  price: 40.0
+  unit_cost: 18.0
+  fixed_cost: 15000.0
+  cost_shock_pct: 0.15
+  pass_through_pct: 1.0
+  elasticity: 0.0
+  markdown_pct: 0.0
+  mitigation_pct: 0.0
+
+checks:
+  live_tests:
+    - name: "revenue_growth"
+      sheet: Inputs
+      cell: B6
+      new_value: 0.05
+      expect_move:
+        - "DCF!B30"
+        - "Event_Rates!D11"
+        - "Event_Tariff!D11"
+        - "Tornado!C5"
+        - "Envelope!B9"
+        - "Football!B8"
+    - name: "risk_free_rate"
+      sheet: Inputs
+      cell: B21
+      new_value: 0.05
+      expect_move:
+        - "DCF!B30"
+        - "Event_Rates!D11"
+        - "Tornado!C5"
+  shock_tests:
+    - name: "rates_bp_up"
+      sheet: Inputs
+      cell: B27
+      new_value: 200
+      full_cell: "Event_Rates!D11"
+      expected_direction: decrease
+      expect_unchanged:
+        - "Event_Tariff!D11"
+    - name: "tariff_cost_up"
+      sheet: Event_Tariff
+      cell: B25
+      new_value: 0.25
+      full_cell: "Event_Tariff!D11"
+      expected_direction: decrease
+      expect_unchanged:
+        - "Event_Rates!D11"

@@ -1,0 +1,4 @@
+# Pinned for reproducible local runs. Supported: Python >=3.11,<3.14 and LibreOffice >=24 (tested: Python 3.13.5, LibreOffice 25.2.3.2).
+openpyxl==3.1.5
+PyYAML==6.0.3
+jsonschema==4.26.0

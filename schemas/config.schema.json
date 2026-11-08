@@ -1,0 +1,479 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/same-event-stress-test/config.schema.json",
+  "title": "SameEventStressTestConfig",
+  "type": "object",
+  "required": [
+    "meta",
+    "inputs",
+    "events"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "meta": {
+      "type": "object",
+      "required": [
+        "title",
+        "company_label"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "company_label": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "inputs": {
+      "type": "object",
+      "required": [
+        "revenue_y0",
+        "revenue_growth",
+        "opex_pct_of_revenue",
+        "tax_rate",
+        "da_pct_of_revenue",
+        "capex_pct_of_revenue",
+        "nwc_pct_of_delta_revenue",
+        "royalty_rate",
+        "commodity_price_index",
+        "commodity_shock",
+        "risk_free_rate",
+        "equity_risk_premium",
+        "beta",
+        "pre_tax_cost_of_debt",
+        "debt_weight",
+        "equity_weight",
+        "rate_shock_bp",
+        "terminal_growth",
+        "exit_ebitda_multiple",
+        "gross_debt",
+        "cash",
+        "floating_debt_share",
+        "fixed_debt_duration_years",
+        "diluted_shares_million",
+        "base_buyback_cash",
+        "cost_elasticity",
+        "capex_price_elasticity"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "revenue_y0": {
+          "type": "number"
+        },
+        "revenue_growth": {
+          "type": "number"
+        },
+        "opex_pct_of_revenue": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "tax_rate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "da_pct_of_revenue": {
+          "type": "number"
+        },
+        "capex_pct_of_revenue": {
+          "type": "number"
+        },
+        "nwc_pct_of_delta_revenue": {
+          "type": "number"
+        },
+        "royalty_rate": {
+          "type": "number"
+        },
+        "commodity_price_index": {
+          "type": "number"
+        },
+        "commodity_shock": {
+          "type": "number"
+        },
+        "risk_free_rate": {
+          "type": "number"
+        },
+        "equity_risk_premium": {
+          "type": "number"
+        },
+        "beta": {
+          "type": "number"
+        },
+        "pre_tax_cost_of_debt": {
+          "type": "number"
+        },
+        "debt_weight": {
+          "type": "number"
+        },
+        "equity_weight": {
+          "type": "number"
+        },
+        "rate_shock_bp": {
+          "type": "number"
+        },
+        "wacc_override": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "terminal_growth": {
+          "type": "number"
+        },
+        "exit_ebitda_multiple": {
+          "type": "number"
+        },
+        "gross_debt": {
+          "type": "number"
+        },
+        "cash": {
+          "type": "number"
+        },
+        "floating_debt_share": {
+          "type": "number"
+        },
+        "fixed_debt_duration_years": {
+          "type": "number"
+        },
+        "diluted_shares_million": {
+          "type": "number"
+        },
+        "base_buyback_cash": {
+          "type": "number"
+        },
+        "cost_elasticity": {
+          "type": "number"
+        },
+        "capex_price_elasticity": {
+          "type": "number"
+        }
+      }
+    },
+    "events": {
+      "type": "object",
+      "required": [
+        "rates"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "rates": {
+          "$ref": "#/$defs/eventSpec"
+        },
+        "commodity": {
+          "$ref": "#/$defs/eventSpec"
+        },
+        "tariff": {
+          "$ref": "#/$defs/eventSpec"
+        }
+      }
+    },
+    "tariff": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "type": "number"
+        },
+        "price": {
+          "type": "number"
+        },
+        "unit_cost": {
+          "type": "number"
+        },
+        "fixed_cost": {
+          "type": "number"
+        },
+        "cost_shock_pct": {
+          "type": "number"
+        },
+        "pass_through_pct": {
+          "type": "number"
+        },
+        "elasticity": {
+          "type": "number"
+        },
+        "markdown_pct": {
+          "type": "number"
+        },
+        "mitigation_pct": {
+          "type": "number"
+        }
+      }
+    },
+    "passthrough": {
+      "type": "object",
+      "required": [
+        "units",
+        "price",
+        "unit_cost",
+        "fixed_cost",
+        "pass_through_pct",
+        "elasticity",
+        "markdown_pct",
+        "mitigation_pct"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "units": {
+          "type": "number"
+        },
+        "price": {
+          "type": "number"
+        },
+        "unit_cost": {
+          "type": "number"
+        },
+        "fixed_cost": {
+          "type": "number"
+        },
+        "cost_shock_pct": {
+          "type": "number"
+        },
+        "pass_through_pct": {
+          "type": "number"
+        },
+        "elasticity": {
+          "type": "number"
+        },
+        "markdown_pct": {
+          "type": "number"
+        },
+        "mitigation_pct": {
+          "type": "number"
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "live_tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "sheet",
+              "cell",
+              "new_value",
+              "expect_move"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "cell": {
+                "type": "string"
+              },
+              "new_value": {},
+              "expect_move": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "expect_unchanged": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "shock_tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "sheet",
+              "cell",
+              "new_value",
+              "full_cell",
+              "expected_direction"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "cell": {
+                "type": "string"
+              },
+              "new_value": {},
+              "full_cell": {
+                "type": "string"
+              },
+              "expected_direction": {
+                "type": "string",
+                "enum": [
+                  "decrease",
+                  "increase"
+                ]
+              },
+              "expect_unchanged": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        "channel_tests": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "sheet",
+              "cell",
+              "new_value",
+              "channel_cell",
+              "full_cell",
+              "expected_channel_direction",
+              "expected_full_direction"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "sheet": {
+                "type": "string"
+              },
+              "cell": {
+                "type": "string"
+              },
+              "new_value": {},
+              "channel_cell": {
+                "type": "string"
+              },
+              "full_cell": {
+                "type": "string"
+              },
+              "expected_channel_direction": {
+                "type": "string",
+                "enum": [
+                  "decrease",
+                  "increase"
+                ]
+              },
+              "expected_full_direction": {
+                "type": "string",
+                "enum": [
+                  "decrease",
+                  "increase"
+                ]
+              },
+              "covers_full": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "channel_bindings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "cell",
+              "must_equal_formula"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "cell": {
+                "type": "string"
+              },
+              "must_equal_formula": {
+                "type": "string"
+              },
+              "adverse_vs_base": {
+                "type": "boolean"
+              },
+              "base_cell": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "charts": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tornado": {
+              "type": "object",
+              "required": [
+                "value_ref",
+                "cat_ref"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "value_ref": {
+                  "type": "string"
+                },
+                "cat_ref": {
+                  "type": "string"
+                }
+              }
+            },
+            "football": {
+              "type": "object",
+              "required": [
+                "baseline_value_ref",
+                "width_value_ref",
+                "cat_ref"
+              ],
+              "additionalProperties": false,
+              "properties": {
+                "baseline_value_ref": {
+                  "type": "string"
+                },
+                "width_value_ref": {
+                  "type": "string"
+                },
+                "cat_ref": {
+                  "type": "string"
+                },
+                "baseline_nofill": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "eventSpec": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

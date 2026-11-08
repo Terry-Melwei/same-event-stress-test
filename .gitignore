@@ -1,0 +1,25 @@
+# Excel / LibreOffice junk
+~$*.xlsx
+*.xlsx#
+*.tmp
+.DS_Store
+Thumbs.db
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Editor
+.idea/
+.vscode/
+*.swp
+
+# Local scratch (keep templates/ and examples/ tracked)
+scratch/
+*.bak
+
+build/generated/
+build/lo_in/
+

@@ -1,0 +1,91 @@
+meta:
+  title: "North Ridge Gold \u2014 ILLUSTRATIVE same-event stress test"
+  company_label: North Ridge Gold (ILLUSTRATIVE)
+  notes: Draft, not investment advice. Teaching case from examples/README.md.
+inputs:
+  revenue_y0: 1200.0
+  revenue_growth: 0.03
+  opex_pct_of_revenue: 0.55
+  tax_rate: 0.25
+  da_pct_of_revenue: 0.08
+  capex_pct_of_revenue: 0.12
+  nwc_pct_of_delta_revenue: 0.05
+  royalty_rate: 0.05
+  commodity_price_index: 1800.0
+  commodity_shock: -0.2
+  risk_free_rate: 0.04
+  equity_risk_premium: 0.05
+  beta: 1.1
+  pre_tax_cost_of_debt: 0.055
+  debt_weight: 0.25
+  equity_weight: 0.75
+  rate_shock_bp: 100
+  wacc_override: null
+  terminal_growth: 0.02
+  exit_ebitda_multiple: 7.0
+  gross_debt: 400.0
+  cash: 150.0
+  floating_debt_share: 0.3
+  fixed_debt_duration_years: 5.0
+  diluted_shares_million: 120.0
+  base_buyback_cash: 5.0
+  cost_elasticity: 0.25
+  capex_price_elasticity: 0.4
+events:
+  rates:
+    enabled: true
+    label: "Interest rates \xB1100 bp"
+  commodity:
+    enabled: true
+    label: "Gold price \xB120%"
+  tariff:
+    enabled: false
+    label: Tariff (disabled)
+passthrough:
+  units: 800.0
+  price: 1800.0
+  unit_cost: 900.0
+  fixed_cost: 120000.0
+  cost_shock_pct: 0.1
+  pass_through_pct: 1.0
+  elasticity: 0.0
+  markdown_pct: 0.0
+  mitigation_pct: 0.0
+checks:
+  live_tests:
+  - name: revenue_growth
+    sheet: Inputs
+    cell: B6
+    new_value: 0.04
+    expect_move:
+    - DCF!B30
+    - Event_Rates!D11
+    - Event_Commodity!D11
+    - Tornado!C5
+    - Envelope!B9
+    - Football!B8
+  - name: risk_free_rate
+    sheet: Inputs
+    cell: B21
+    new_value: 0.05
+    expect_move:
+    - DCF!B30
+    - Event_Rates!D11
+    - Tornado!C5
+  shock_tests:
+  - name: rates_bp_up
+    sheet: Inputs
+    cell: B27
+    new_value: 200
+    full_cell: Event_Rates!D11
+    expected_direction: decrease
+    expect_unchanged:
+    - Event_Commodity!D11
+  - name: commodity_more_adverse
+    sheet: Inputs
+    cell: B18
+    new_value: -0.35
+    full_cell: Event_Commodity!D11
+    expected_direction: decrease
+    expect_unchanged:
+    - Event_Rates!D11

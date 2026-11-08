@@ -1,0 +1,93 @@
+meta:
+  title: "Same-event multi-channel stress test \u2014 ILLUSTRATIVE template"
+  company_label: Illustrative Industrial Co. (ILLUSTRATIVE)
+  notes: Draft, not investment advice. Teaching numbers only.
+inputs:
+  revenue_y0: 1000.0
+  revenue_growth: 0.05
+  opex_pct_of_revenue: 0.75
+  tax_rate: 0.25
+  da_pct_of_revenue: 0.05
+  capex_pct_of_revenue: 0.08
+  nwc_pct_of_delta_revenue: 0.1
+  royalty_rate: 0.03
+  commodity_price_index: 100.0
+  commodity_shock: -0.2
+  risk_free_rate: 0.04
+  equity_risk_premium: 0.05
+  beta: 1.2
+  pre_tax_cost_of_debt: 0.05
+  debt_weight: 0.2
+  equity_weight: 0.8
+  rate_shock_bp: 100
+  wacc_override: null
+  terminal_growth: 0.02
+  exit_ebitda_multiple: 8.0
+  gross_debt: 300.0
+  cash: 100.0
+  floating_debt_share: 0.4
+  fixed_debt_duration_years: 4.0
+  diluted_shares_million: 100.0
+  base_buyback_cash: 10.0
+  cost_elasticity: 0.3
+  capex_price_elasticity: 0.5
+events:
+  rates:
+    enabled: true
+    label: Interest rates shock
+  commodity:
+    enabled: true
+    label: Commodity price shock
+  tariff:
+    enabled: false
+    label: Tariff (disabled)
+passthrough:
+  units: 1000.0
+  price: 50.0
+  unit_cost: 20.0
+  fixed_cost: 5000.0
+  cost_shock_pct: 0.15
+  pass_through_pct: 1.0
+  elasticity: 0.0
+  markdown_pct: 0.0
+  mitigation_pct: 0.0
+checks:
+  live_tests:
+  - name: revenue_growth
+    sheet: Inputs
+    cell: B6
+    new_value: 0.06
+    expect_move:
+    - DCF!B30
+    - Event_Rates!D11
+    - Event_Commodity!D11
+    - Tornado!C5
+    - Envelope!B9
+    - Football!B8
+  - name: risk_free_rate
+    sheet: Inputs
+    cell: B21
+    new_value: 0.05
+    expect_move:
+    - DCF!B30
+    - Event_Rates!D11
+    - Event_Rates!F11
+    - Tornado!C5
+    - Envelope!B9
+  shock_tests:
+  - name: rates_bp_up
+    sheet: Inputs
+    cell: B27
+    new_value: 200
+    full_cell: Event_Rates!D11
+    expected_direction: decrease
+    expect_unchanged:
+    - Event_Commodity!D11
+  - name: commodity_more_adverse
+    sheet: Inputs
+    cell: B18
+    new_value: -0.35
+    full_cell: Event_Commodity!D11
+    expected_direction: decrease
+    expect_unchanged:
+    - Event_Rates!D11
