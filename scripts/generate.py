@@ -1280,7 +1280,7 @@ def _build_football(wb: Workbook, second_sheet: str = "Event_Commodity") -> None
     fb["D8"] = "=MAX(DCF!B33,Tornado!D5)"
     fb["E8"] = "Blended-mid sensitivity proxy from Event_Rates FULL"
 
-    fb["A9"] = f"{second_sheet.replace("Event_", "")} FULL stress band (proxy)"
+    fb["A9"] = f"{second_sheet.replace('Event_', '')} FULL stress band (proxy)"
     fb["B9"] = "=MIN(DCF!B33,Tornado!D6)"
     fb["C9"] = "=DCF!B33"
     fb["D9"] = "=MAX(DCF!B33,Tornado!D6)"
