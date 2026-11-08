@@ -1,6 +1,4 @@
-# This workflow will install Python dependencies, run tests and lint with a variety of Python versions
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-python
-
+# Lint and test the stress-test skill on the supported Python range (README: >=3.11,<3.14).
 name: Python package
 
 on:
@@ -16,14 +14,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.10", "3.11"]
+        python-version: ["3.11", "3.12", "3.13"]
 
     steps:
     - uses: actions/checkout@v4
     - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v3
+      uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
+    - name: Install LibreOffice (checker live-input recalcs)
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends libreoffice-calc
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -36,5 +38,6 @@ jobs:
         # exit-zero treats all errors as warnings. The GitHub editor is 127 chars wide
         flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
     - name: Test with pytest
+      # Generation, formula and checker tests (checker runs on the LibreOffice installed above); --regression runs locally (see README)
       run: |
-        pytest
+        pytest -v
