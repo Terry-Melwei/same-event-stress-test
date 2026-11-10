@@ -17,6 +17,7 @@ from jsonschema import Draft202012Validator
 from openpyxl import Workbook
 from openpyxl.chart import BarChart, Reference
 from openpyxl.chart.shapes import GraphicalProperties
+from openpyxl.formatting.rule import CellIsRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -32,6 +33,11 @@ MUTED = Font(name="Calibri", size=10, italic=True, color="666666")
 YELLOW = PatternFill("solid", fgColor="FFFF99")
 LIGHT = PatternFill("solid", fgColor="F2F2F2")
 INFO_FILL = PatternFill("solid", fgColor="DDEBF7")
+# Live covenant-flag highlight (conditional formatting; stays outside FULL and the blend).
+BREACH_FILL = PatternFill("solid", fgColor="FFC7CE", bgColor="FFC7CE")
+BREACH_FONT = Font(name="Calibri", size=11, color="9C0006", bold=True)
+PASS_FILL = PatternFill("solid", fgColor="C6EFCE", bgColor="C6EFCE")
+PASS_FONT = Font(name="Calibri", size=11, color="006100")
 THIN = Border(
     left=Side(style="thin", color="B0B0B0"),
     right=Side(style="thin", color="B0B0B0"),
@@ -1423,6 +1429,15 @@ def _covenant_formulas(sheet: str, x: str) -> tuple[str, str]:
     raise ValueError(sheet)
 
 
+def _add_covenant_flag_formatting(ws, ranges: list[str]) -> None:
+    """Live red BREACH / green PASS highlight on covenant flag cells (outside FULL and the blend)."""
+    breach = CellIsRule(operator="equal", formula=['"BREACH"'], fill=BREACH_FILL, font=BREACH_FONT)
+    passed = CellIsRule(operator="equal", formula=['"PASS"'], fill=PASS_FILL, font=PASS_FONT)
+    for rng in ranges:
+        ws.conditional_formatting.add(rng, breach)
+        ws.conditional_formatting.add(rng, passed)
+
+
 def _add_covenant_row(ws, sheet: str, shock: str) -> None:
     """Net debt / Year-1 EBITDA under FULL and the mirror, vs the Inputs covenant limit."""
     rc, rm = ROW_MIRROR_CONF, ROW_MIRROR_MIRROR
@@ -1448,6 +1463,7 @@ def _add_covenant_row(ws, sheet: str, shock: str) -> None:
             ws[f"{c}{r}"].border = THIN
         style_formula(ws[f"M{r}"])
         ws[f"M{r}"].border = THIN
+    _add_covenant_flag_formatting(ws, [f"M{ROW_MIRROR_CONF}:M{ROW_MIRROR_MIRROR}"])
     ws[f"A{ROW_COV_NOTE}"] = (
         "Covenant columns I–M are diagnostic and sit outside FULL and the blend. "
         "EBITDA = EBIT + D&A, with EBIT = revenue − opex − royalty; opex already includes D&A, which is added back. "
@@ -2411,6 +2427,11 @@ def _build_summary(wb: Workbook, event_list) -> None:
     sm[f"A{foot + 1}"].alignment = Alignment(wrap_text=True)
     sm.merge_cells(f"A{foot + 1}:O{foot + 2}")
     set_widths(sm, [26, 26, 16, 14, 14, 14, 14, 14, 14, 14, 18, 16, 14, 16, 14])
+    # Ranked flag columns M (configured) and O (mirror); source-block flags L and N.
+    _add_covenant_flag_formatting(sm, [
+        f"M5:M{4 + n}", f"O5:O{4 + n}",
+        f"L{first}:L{last}", f"N{first}:N{last}",
+    ])
 
 
 def _build_passthrough(wb: Workbook, pt: dict[str, Any]) -> None:
@@ -2543,7 +2564,7 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         "%Δ (percentage change): each FULL versus its own perpetual-growth method base, then × blended mid → blended-mid sensitivity proxy.",
         "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that and the Ladder sheet. On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
         "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
-        "Covenant row (columns I–M of the mirror rows, and on the Summary): net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. The Inputs limit is labelled ILLUSTRATIVE, replace with your own loan limit; a real covenant limit comes from the company's loan agreement, and its source cell ships as TO FILL: cite the loan agreement clause. This is a diagnostic, outside FULL and the blend. EBITDA = EBIT + D&A, matching the model's existing definition (DCF Year-5 EBITDA on DCF!B20 uses the same add-back; opex already includes D&A, which is added back so it is not subtracted twice). A non-positive EBITDA, or a ratio above the limit, is BREACH.",
+        "Covenant row (columns I–M of the mirror rows, and on the Summary): net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. The Inputs limit is labelled ILLUSTRATIVE, replace with your own loan limit; a real covenant limit comes from the company's loan agreement, and its source cell ships as TO FILL: cite the loan agreement clause. This is a diagnostic, outside FULL and the blend. EBITDA = EBIT + D&A, matching the model's existing definition (DCF Year-5 EBITDA on DCF!B20 uses the same add-back; opex already includes D&A, which is added back so it is not subtracted twice). A non-positive EBITDA, or a ratio above the limit, is BREACH. A BREACH flag is shown in red (bold dark-red text on a red fill); PASS is shown in light green. The highlight is live conditional formatting and sits outside FULL and the blend.",
         "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. If no tested shock breaks the threshold, the cell reads 'Not reached: worst is -X% at …' with the worst fall and shock on the grid. No goal seek, no macros.",
         "Shock calibration (rows 54–58): yellow source, basis and severity cells for each shock size (for example a historical 1-year 95th percentile move, labelled plausible, severe or extreme). Shipped as TO FILL; never invent a statistic.",
         "Ladder sheet: each event's FULL re-run at yellow multiples of its configured shock (default −1.5× to +1.5×), both directions, via helper rows 90–97 on each event sheet. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a check cell. The reverse stress test there interpolates the shock that cuts FULL equity by each yellow % target; scripts/reverse_stress.py solves it exactly.",

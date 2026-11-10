@@ -458,3 +458,74 @@ def test_reverse_stress_script_covers_fx_and_demand():
     assert "Event_Demand" in out
     assert "Draft, not investment advice" in out
 
+def _covenant_flag_rules(ws):
+    """Return (range_text, text, rule) for live cellIs rules on BREACH / PASS."""
+    found = []
+    for cf in ws.conditional_formatting:
+        for rule in cf.rules:
+            formulas = [str(f) for f in (rule.formula or [])]
+            joined = " ".join(formulas)
+            if rule.type != "cellIs" or rule.operator != "equal":
+                continue
+            for label in ("BREACH", "PASS"):
+                if label in joined:
+                    found.append((str(cf.sqref), label, rule))
+    return found
+
+
+def _range_covers(sqref: str, cell: str) -> bool:
+    from openpyxl.worksheet.cell_range import MultiCellRange
+    return cell in MultiCellRange(sqref)
+
+
+def test_covenant_breach_conditional_formatting(generated, recalculated):
+    """Generated (and recalculated) workbooks highlight BREACH in red on event and Summary flag cells."""
+    def assert_cf(path, n_events, sheets):
+        wb = openpyxl.load_workbook(path)
+        for sheet in sheets:
+            hits = _covenant_flag_rules(wb[sheet])
+            texts = {label for _rng, label, _r in hits}
+            assert "BREACH" in texts, (path.name, sheet, hits)
+            assert "PASS" in texts, (path.name, sheet, hits)
+            assert any(_range_covers(rng, "M61") and _range_covers(rng, "M62")
+                       for rng, label, _r in hits if label == "BREACH"), (path.name, sheet, hits)
+            for _rng, label, rule in hits:
+                if label == "BREACH":
+                    assert rule.dxf is not None and rule.dxf.font is not None and rule.dxf.font.b
+                    color = (rule.dxf.font.color.rgb if rule.dxf.font.color is not None else "") or ""
+                    assert "9C0006" in str(color).upper()
+                    fill = rule.dxf.fill
+                    # LibreOffice may move a solid fill from fgColor to bgColor after recalc.
+                    fill_rgb = " ".join(
+                        str(getattr(getattr(fill, attr, None), "rgb", "") or "")
+                        for attr in ("fgColor", "bgColor")
+                    ).upper()
+                    assert "FFC7CE" in fill_rgb, fill_rgb
+        sm_hits = _covenant_flag_rules(wb["Summary"])
+        sm_texts = {label for _rng, label, _r in sm_hits}
+        assert "BREACH" in sm_texts and "PASS" in sm_texts, (path.name, sm_hits)
+        # Ranked flags M (configured) and O (mirror); source-block flags L and N.
+        last_rank, first_src, last_src = 4 + n_events, 14, 13 + n_events
+        needed = [f"M{5}", f"M{last_rank}", f"O{5}", f"O{last_rank}",
+                  f"L{first_src}", f"L{last_src}", f"N{first_src}", f"N{last_src}"]
+        for cell in needed:
+            assert any(_range_covers(rng, cell) for rng, label, _r in sm_hits if label == "BREACH"), (
+                path.name, cell, sm_hits
+            )
+        wb.close()
+
+    for name, path in generated.items():
+        sheets = _event_sheets(openpyxl.load_workbook(path, read_only=True))
+        assert_cf(path, len(sheets), sheets)
+    # LibreOffice recalc must preserve the rules
+    for name, path in recalculated.items():
+        sheets = _event_sheets(openpyxl.load_workbook(path, read_only=True))
+        assert_cf(path, len(sheets), sheets)
+
+    wb = openpyxl.load_workbook(recalculated["apparel_retailer"], data_only=True)
+    assert wb["Event_Demand"]["G11"].value == pytest.approx(43.06, abs=0.01)
+    assert wb["Event_Demand"]["M61"].value == "BREACH"
+    assert wb["Event_Demand"]["K61"].value == pytest.approx(0.442, abs=0.001)
+    assert wb["Event_Rates"]["M61"].value == "PASS"
+    wb.close()
+
