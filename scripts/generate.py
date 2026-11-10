@@ -118,7 +118,7 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     cover["A11"].fill = YELLOW
     cover["A13"] = (
         "Terms on this sheet: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow "
-        "to the firm. EV = enterprise value. EPS = earnings per share. bp = basis points. Capex = capital expenditure. "
+        "to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. EBITDA = earnings before interest, tax, depreciation and amortisation. bp = basis points. Capex = capital expenditure. "
         "$/sh = US dollars per diluted share. FULL = all valuation channels of one event applied together."
     )
     cover["A13"].alignment = Alignment(wrap_text=True)
@@ -256,7 +256,24 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     style_formula(ws["B50"])
     ws["C50"] = "EBIT = earnings before interest and tax; for display only"
 
-    set_widths(ws, [52, 14, 72])
+    section(51, "Debt covenant (diagnostic, outside FULL and the blend)")
+    put(52, "Net debt / Year-1 EBITDA covenant limit (blank = n/a)", inp.get("covenant_nd_ebitda_limit"), "0.00",
+        "EBITDA = earnings before interest, tax, depreciation and amortisation = EBIT + D&A. "
+        "Compared on each event sheet next to the mirror. Blank = not applicable.")
+    ws["A53"] = "Base Year-1 EBITDA (EBIT + D&A)"
+    ws["B53"] = "=DCF!B8+DCF!B11"
+    ws["B53"].number_format = "#,##0.0"
+    style_formula(ws["B53"])
+    ws["C53"] = "Same definition as DCF!B20, for Year 1. Opex already includes D&A; D&A is added back."
+    ws["C53"].font = MUTED
+    ws["A54"] = "Base net debt / Year-1 EBITDA"
+    ws["B54"] = '=IF(B53<=0,"n/m",B47/B53)'
+    ws["B54"].number_format = "0.00"
+    style_formula(ws["B54"])
+    ws["C54"] = "For display only; the event-sheet covenant row uses the shocked net debt and Year-1 EBITDA."
+    ws["C54"].font = MUTED
+
+    set_widths(ws, [62, 14, 72])
 
     # ---------- DCF ----------
     dcf = wb.create_sheet("DCF")
@@ -458,6 +475,14 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     if use_capex:
         _build_event_capex(wb, capex_cfg)
         event_list.append(("Event_Capex", capex_cfg.get("label") or "Capex cycle FULL", capex_cfg))
+    fx_cfg = events.get("fx") or {}
+    if fx_cfg.get("enabled"):
+        _build_event_fx(wb, fx_cfg)
+        event_list.append(("Event_FX", fx_cfg.get("label") or "FX FULL", fx_cfg))
+    demand_cfg = events.get("demand") or {}
+    if demand_cfg.get("enabled"):
+        _build_event_demand(wb, demand_cfg)
+        event_list.append(("Event_Demand", demand_cfg.get("label") or "Demand FULL", demand_cfg))
 
     for sheet, _label, ev_cfg in event_list:
         _add_event_extras(wb[sheet], sheet, ev_cfg)
@@ -1123,6 +1148,20 @@ EVENT_SPECS: dict[str, dict[str, Any]] = {
         "standalone_rows": [6, 7, 8],
         "short": "Capex",
     },
+    "Event_FX": {
+        "shock_ref": "$B$21",
+        "unit": "%",
+        "fmt": "0.0%",
+        "standalone_rows": [6, 7, 8],
+        "short": "FX",
+    },
+    "Event_Demand": {
+        "shock_ref": "$B$21",
+        "unit": "%",
+        "fmt": "0.0%",
+        "standalone_rows": [6, 7, 8, 9],
+        "short": "Demand",
+    },
 }
 
 DEFAULT_REVERSE_MULTIPLES = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
@@ -1131,8 +1170,10 @@ INTERACTION_LABEL = "Cross-channel interaction (not size non-linearity)"
 
 # Fixed layout of the blocks added to every event sheet (stable for check_workbook / tests).
 ROW_INTERACTION = 12
-ROW_CALIB_TITLE, ROW_CALIB_SHOCK, ROW_CALIB_SOURCE, ROW_CALIB_BASIS = 54, 55, 56, 57
+ROW_CALIB_TITLE, ROW_CALIB_SHOCK, ROW_CALIB_SOURCE, ROW_CALIB_BASIS, ROW_CALIB_SEVERITY = 54, 55, 56, 57, 58
 ROW_MIRROR_TITLE, ROW_MIRROR_HDR, ROW_MIRROR_CONF, ROW_MIRROR_MIRROR, ROW_MIRROR_ASYM = 59, 60, 61, 62, 63
+ROW_COV_NOTE = 64
+COVENANT_LIMIT_REF = "Inputs!$B$52"
 ROW_REV_TITLE, ROW_REV_THRESHOLD, ROW_REV_RESULT, ROW_REV_HDR = 65, 66, 67, 68
 ROW_REV_FIRST = 69  # 8 grid rows: 69..76
 N_REV_STEPS = 8
@@ -1238,11 +1279,77 @@ def _helper_tariff(ws, row: int, x: str) -> str:
     return f"G{row}"
 
 
+def _helper_fx_fcff(ws, row: int, x: str, *, rev_on: bool = True, cost_on: bool = True, hedge_on: bool = True) -> None:
+    """FX operating FCFF at home-currency appreciation x (B..F of `row`). Debt stays out of FCFF."""
+    def rev(cl):
+        return f"DCF!{cl}5*(1-$B$22*{x})" if rev_on else f"DCF!{cl}5"
+
+    def opex(cl):
+        return f"DCF!{cl}6*(1-$B$23*{x})" if cost_on else f"DCF!{cl}6"
+
+    def hedge(cl):
+        return f"$B$25*$B$22*DCF!{cl}5*{x}" if hedge_on else "0"
+
+    for col in range(2, 7):
+        cl = get_column_letter(col)
+        nopat = f"({rev(cl)}-{opex(cl)}-{rev(cl)}*Inputs!$B$12+{hedge(cl)})*(1-Inputs!$B$8)"
+        ws.cell(row, col, f"={nopat}+DCF!{cl}11+DCF!{cl}12+({_dnwc(col, rev)})")
+        ws.cell(row, col).number_format = "#,##0.0"
+        style_formula(ws.cell(row, col))
+
+
+def _helper_fx(ws, row: int, x: str) -> str:
+    """FULL FX equity at shock x: translated operations + financial hedge + FX-debt remeasurement in the bridge."""
+    _helper_fx_fcff(ws, row, x, rev_on=True, cost_on=True, hedge_on=True)
+    cells = [f"{get_column_letter(c)}{row}" for c in range(2, 7)]
+    # Financing once: foreign-currency debt shrinks in home-currency terms when the home currency strengthens.
+    ws[f"G{row}"] = "=" + _equity_formula(cells) + f"+$B$24*Inputs!$B$35*{x}"
+    ws[f"G{row}"].number_format = "#,##0.0"
+    style_formula(ws[f"G{row}"])
+    return f"G{row}"
+
+
+def _helper_demand_fcff(
+    ws, row: int, x: str, *, vol_on: bool = True, price_on: bool = True,
+    leverage_on: bool = True, inventory_on: bool = True,
+) -> None:
+    """Demand-event FCFF at volume shock x (B..F of `row`)."""
+    def rev(cl):
+        vol = f"(1+{x})" if vol_on else "1"
+        price = f"(1+$B$22*{x})" if price_on else "1"
+        return f"DCF!{cl}5*{vol}*{price}"
+
+    def opex(cl):
+        if leverage_on:
+            return f"DCF!{cl}6*($B$23+(1-$B$23)*(1+{x}))"
+        return f"DCF!{cl}6"
+
+    for col in range(2, 7):
+        cl = get_column_letter(col)
+        nopat = f"({rev(cl)}-{opex(cl)}-{rev(cl)}*Inputs!$B$12)*(1-Inputs!$B$8)"
+        inv = f"-$B$24*MAX(0,-{x})*DCF!B5" if (inventory_on and col == 2) else "0"
+        ws.cell(row, col, f"={nopat}+DCF!{cl}11+DCF!{cl}12+({_dnwc(col, rev)})+({inv})")
+        ws.cell(row, col).number_format = "#,##0.0"
+        style_formula(ws.cell(row, col))
+
+
+def _helper_demand(ws, row: int, x: str) -> str:
+    """FULL demand equity at volume shock x: (1+v)×(1+εv) revenue, fixed-cost leverage, downside inventory."""
+    _helper_demand_fcff(ws, row, x)
+    cells = [f"{get_column_letter(c)}{row}" for c in range(2, 7)]
+    ws[f"G{row}"] = "=" + _equity_formula(cells)
+    ws[f"G{row}"].number_format = "#,##0.0"
+    style_formula(ws[f"G{row}"])
+    return f"G{row}"
+
+
 HELPER_WRITERS = {
     "Event_Rates": _helper_rates,
     "Event_Commodity": _helper_commodity,
     "Event_Tariff": _helper_tariff,
     "Event_Capex": _helper_capex,
+    "Event_FX": _helper_fx,
+    "Event_Demand": _helper_demand,
 }
 
 
@@ -1255,6 +1362,92 @@ def _proxy_cols(ws, r: int) -> None:
         ws[f"{c}{r}"].number_format = fmt
         style_formula(ws[f"{c}{r}"])
         ws[f"{c}{r}"].border = THIN
+
+
+
+def _covenant_formulas(sheet: str, x: str) -> tuple[str, str]:
+    """Live net-debt and Year-1 EBITDA (EBIT + D&A) formulas at shock `x` (a cell ref)."""
+    base_nd = "Inputs!$B$47"
+    base_ebitda = "Inputs!$B$53"
+    if sheet == "Event_Rates":
+        nd = f"{base_nd}-Inputs!$B$38*Inputs!$B$35*(1-Inputs!$B$37)*{x}/10000"
+        return nd, base_ebitda
+    if sheet == "Event_Commodity":
+        rev = f"(DCF!B5*(1+{x}))"
+        opex = f"(DCF!B6*(1+Inputs!$B$13*{x}))"
+        roy = f"({rev}*Inputs!$B$12)"
+        ebitda = f"({rev}-{opex}-{roy}+DCF!B11)"
+        return base_nd, ebitda
+    if sheet == "Event_Tariff":
+        u = "B33"
+        eff = f"({x}*(1-$B$29))"
+        suc = f"($B$23*(1+{eff}))"
+        sp = f"($B$22+$B$23*{eff}*$B$26)"
+        ppct = f"IF($B$22=0,0,({sp}-$B$22)/$B$22)"
+        su = f"({u}*(1+$B$27*{ppct}))"
+        dgp = f"(({su}*{sp}*(1-$B$28)-{su}*{suc})-({u}*$B$22-{u}*$B$23))"
+        ebitda = f"(DCF!B8+DCF!B11+{dgp})"
+        return base_nd, ebitda
+    if sheet == "Event_Capex":
+        rev = f"(DCF!B5*(1+$B$22*{x}))"
+        ebitda = f"({rev}*(1-Inputs!$B$7-Inputs!$B$12)+DCF!B11)"
+        pv = "+".join(
+            f"-DCF!{get_column_letter(c)}12*$B$23*{x}/(1+Inputs!$B$46)^{c - 1}" for c in range(2, 7)
+        )
+        nd = f"{base_nd}-$B$24*MAX(0,{pv})"
+        return nd, ebitda
+    if sheet == "Event_FX":
+        rev = f"(DCF!B5*(1-$B$22*{x}))"
+        opex = f"(DCF!B6*(1-$B$23*{x}))"
+        hedge = f"($B$25*$B$22*DCF!B5*{x})"
+        roy = f"({rev}*Inputs!$B$12)"
+        ebitda = f"({rev}-{opex}-{roy}+{hedge}+DCF!B11)"
+        nd = f"{base_nd}-$B$24*Inputs!$B$35*{x}"
+        return nd, ebitda
+    if sheet == "Event_Demand":
+        rev = f"(DCF!B5*(1+{x})*(1+$B$22*{x}))"
+        opex = f"(DCF!B6*($B$23+(1-$B$23)*(1+{x})))"
+        roy = f"({rev}*Inputs!$B$12)"
+        ebitda = f"({rev}-{opex}-{roy}+DCF!B11)"
+        return base_nd, ebitda
+    raise ValueError(sheet)
+
+
+def _add_covenant_row(ws, sheet: str, shock: str) -> None:
+    """Net debt / Year-1 EBITDA under FULL and the mirror, vs the Inputs covenant limit."""
+    rc, rm = ROW_MIRROR_CONF, ROW_MIRROR_MIRROR
+    # Headers already include I–M from the mirror header row.
+    ws["I60"].font = HEADER
+    ws["J60"].font = HEADER
+    ws["K60"].font = HEADER
+    ws["L60"].font = HEADER
+    ws["M60"].font = HEADER
+    for r, xref in ((rc, f"$C${rc}"), (rm, f"$C${rm}")):
+        nd_fx, ebitda_fx = _covenant_formulas(sheet, xref)
+        # For the configured case, C61 already equals the shock; use it so both rows share one construction.
+        ws[f"I{r}"] = f"={nd_fx}"
+        ws[f"J{r}"] = f"={ebitda_fx}"
+        ws[f"K{r}"] = f'=IF(J{r}<=0,"n/m",I{r}/J{r})'
+        ws[f"L{r}"] = f'=IF({COVENANT_LIMIT_REF}="","n/a",{COVENANT_LIMIT_REF})'
+        ws[f"M{r}"] = (
+            f'=IF({COVENANT_LIMIT_REF}="","n/a",IF(J{r}<=0,"BREACH",IF(I{r}/J{r}>{COVENANT_LIMIT_REF},"BREACH","PASS")))'
+        )
+        for c, fmt in (("I", "#,##0.0"), ("J", "#,##0.0"), ("K", "0.00"), ("L", "0.00")):
+            ws[f"{c}{r}"].number_format = fmt
+            style_formula(ws[f"{c}{r}"])
+            ws[f"{c}{r}"].border = THIN
+        style_formula(ws[f"M{r}"])
+        ws[f"M{r}"].border = THIN
+    ws[f"A{ROW_COV_NOTE}"] = (
+        "Covenant columns I–M are diagnostic and sit outside FULL and the blend. "
+        "EBITDA = EBIT + D&A, with EBIT = revenue − opex − royalty; opex already includes D&A, which is added back. "
+        "Year-1 EBITDA is used. A blank limit is n/a. A non-positive EBITDA, or a ratio above the limit, is BREACH. "
+        "The inventory overlay on Event_Demand is inside FCFF and does not restate t0 net debt."
+    )
+    ws[f"A{ROW_COV_NOTE}"].font = MUTED
+    ws[f"A{ROW_COV_NOTE}"].alignment = Alignment(wrap_text=True)
+    ws.merge_cells(f"A{ROW_COV_NOTE}:M{ROW_COV_NOTE}")
+    ws.row_dimensions[ROW_COV_NOTE].height = 32
 
 
 def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
@@ -1307,13 +1500,22 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     ws[f"A{ROW_CALIB_BASIS}"] = "Calibration basis (e.g. historical 1-year 95th percentile move)"
     ws[f"B{ROW_CALIB_BASIS}"] = ev_cfg.get("calibration_basis") or "TO FILL: basis"
     style_judgment(ws[f"B{ROW_CALIB_BASIS}"])
+    ws[f"A{ROW_CALIB_SEVERITY}"] = "Severity label (plausible, severe or extreme)"
+    ws[f"B{ROW_CALIB_SEVERITY}"] = ev_cfg.get("calibration_severity") or "TO FILL: severity"
+    style_judgment(ws[f"B{ROW_CALIB_SEVERITY}"])
     ws[f"C{ROW_CALIB_SOURCE}"] = "Judgment (yellow). Cite the source; never invent a statistic. TO FILL blocks a real-issuer CLEAR."
     ws[f"C{ROW_CALIB_SOURCE}"].font = MUTED
+    ws[f"C{ROW_CALIB_SEVERITY}"] = "plausible = seen several times in the window; severe = seen once; extreme = beyond the window."
+    ws[f"C{ROW_CALIB_SEVERITY}"].font = MUTED
 
     # --- Up / down mirror ---
     hdr = ["Case", "Multiple of shock", f"Shock size ({unit})", "FULL equity ($m, perp. method)",
-           "%Δ vs own method base", "Blended-mid sensitivity proxy ($m)", "Proxy $/sh diluted"]
-    ws[f"A{ROW_MIRROR_TITLE}"] = "Up / down mirror — the same event in both directions (diagnostic, outside the blend)"
+           "%Δ vs own method base", "Blended-mid sensitivity proxy ($m)", "Proxy $/sh diluted",
+           "", "Net debt ($m)", "Year-1 EBITDA ($m)", "Net debt / Year-1 EBITDA", "Covenant limit (×)", "Flag"]
+    ws[f"A{ROW_MIRROR_TITLE}"] = (
+        "Up / down mirror — the same event in both directions, with the net debt / EBITDA covenant row "
+        "(diagnostic, outside the blend). EBITDA = earnings before interest, tax, depreciation and amortisation."
+    )
     ws[f"A{ROW_MIRROR_TITLE}"].font = HEADER
     ws[f"A{ROW_MIRROR_TITLE}"].fill = LIGHT
     for c, h in enumerate(hdr, 1):
@@ -1343,6 +1545,9 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
         style_formula(ws[f"{c}{ra}"])
     ws[f"H{ra}"] = "0 = symmetric at this size. Negative = the bad direction hurts more than the good direction helps."
     ws[f"H{ra}"].font = MUTED
+
+    # --- Covenant row (next to the mirror; diagnostic, outside FULL and the blend) ---
+    _add_covenant_row(ws, sheet, shock)
 
     # --- Reverse stress test (formula grid; no goal seek, no macros) ---
     ws[f"A{ROW_REV_TITLE}"] = "Reverse stress test — smallest tested shock that takes FULL value per share below a threshold"
@@ -1561,6 +1766,285 @@ def _build_event_capex(wb: Workbook, cx: dict[str, Any]) -> None:
     set_widths(ws, [8, 16, 58, 20, 14, 18, 14, 18, 16])
 
 
+def _build_event_fx(wb: Workbook, fx: dict[str, Any]) -> None:
+    """Foreign-exchange event: revenue translation, natural cost hedge + financial hedge, FX-debt remeasurement."""
+    ws = wb.create_sheet("Event_FX")
+    ws["A1"] = "EVENT: Foreign exchange (FX) shock — ONE event (standalone / information / FULL)"
+    ws["A1"].font = TITLE
+    ws["A2"] = (
+        "FX = foreign exchange. The shock is a home-currency appreciation (positive = the home currency strengthens). "
+        "Free cash flow to the firm (FCFF) stays operating-only. Foreign-currency debt is remeasured ONCE in the "
+        "net-debt bridge, not inside FCFF. Draft, not investment advice."
+    )
+    ws["A2"].font = MUTED
+    ws["A2"].alignment = Alignment(wrap_text=True)
+    ws.merge_cells("A2:G3")
+    ws["A4"] = (
+        "Terms: NWC = net working capital; D&A = depreciation and amortisation; WACC = weighted average cost of capital; "
+        "%Δ = percentage change; $/sh = US dollars per diluted share. This event is linear in the shock by construction "
+        "(translation, the cost offset, the hedge and the debt remeasurement all scale in proportion to the shock), so "
+        "the up and down cases mirror; do not claim FX non-linearity from this workbook."
+    )
+    ws["A4"].font = MUTED
+    headers = [
+        "Row", "Kind", "Channel",
+        "Stressed equity ($m, perp. method)", "%Δ vs own method base",
+        "Blended-mid sensitivity proxy ($m)", "Proxy $/sh diluted",
+    ]
+    for c, h in enumerate(headers, 1):
+        ws.cell(5, c, h)
+        ws.cell(5, c).font = HEADER
+        ws.cell(5, c).fill = LIGHT
+        ws.cell(5, c).border = THIN
+
+    ws["A20"] = "Foreign-exchange event inputs"
+    ws["A20"].font = HEADER
+    ws["A20"].fill = LIGHT
+
+    def put(r, label, val, fmt, judgment=False, note=""):
+        ws[f"A{r}"] = label
+        ws[f"B{r}"] = val
+        ws[f"B{r}"].number_format = fmt
+        (style_judgment if judgment else style_input)(ws[f"B{r}"])
+        ws[f"C{r}"] = note
+        ws[f"C{r}"].font = MUTED
+
+    put(21, "Home-currency appreciation (enter the adverse direction)", fx.get("fx_shock_pct", 0.10), "0.0%",
+        note="ILLUSTRATIVE; one event only. Positive = home currency strengthens. Grid and mirror scale this cell.")
+    put(22, "Foreign-currency revenue share", fx.get("foreign_revenue_share", 0.40), "0.0%",
+        note="Share of revenue earned in foreign currency")
+    put(23, "Foreign-currency cost share (natural hedge)", fx.get("foreign_cost_share", 0.15), "0.0%",
+        note="Share of operating costs denominated in foreign currency")
+    put(24, "Foreign-currency debt share", fx.get("fx_debt_share", 0.30), "0.0%",
+        note="Share of gross debt remeasured in the net-debt bridge")
+    put(25, "Financial hedge ratio (share of foreign revenue hedged)", fx.get("hedge_ratio", 0.25), "0.0%", True,
+        "Judgment: forwards covering this share of foreign revenue; counted once, with the natural cost offset. "
+        "Not also applied to the debt channel (lower the debt share if that debt is hedged).")
+
+    ws["A29"] = "Item"
+    for i, yr in enumerate([1, 2, 3, 4, 5], start=2):
+        ws.cell(29, i, f"Y{yr}").font = HEADER
+    _helper_fx_fcff(ws, 30, "$B$21", rev_on=True, cost_on=False, hedge_on=False)
+    ws["A30"] = "FCFF A — foreign revenue translation only (opex and hedge at base; D&A and capex at base $)"
+    _helper_fx_fcff(ws, 31, "$B$21", rev_on=False, cost_on=True, hedge_on=True)
+    ws["A31"] = "FCFF B — foreign-currency cost offset (natural hedge) + financial hedge (base revenue)"
+    _helper_fx_fcff(ws, 32, "$B$21", rev_on=True, cost_on=True, hedge_on=True)
+    ws["A32"] = "FCFF operating FULL (A+B, before debt remeasurement)"
+
+    rows = [
+        (35, "Equity A standalone — revenue translation (base net debt)",
+         "=" + _equity_formula([f"{get_column_letter(c)}30" for c in range(2, 7)]), "#,##0.0"),
+        (36, "Equity B standalone — natural cost offset + financial hedge (base net debt)",
+         "=" + _equity_formula([f"{get_column_letter(c)}31" for c in range(2, 7)]), "#,##0.0"),
+        (37, "FX debt remeasurement ($m, once in the bridge) = foreign-debt share × gross debt × shock",
+         "=$B$24*Inputs!$B$35*$B$21", "#,##0.0"),
+        (38, "Equity C standalone — FX-debt remeasurement only (base operations)",
+         "=DCF!B28+B37", "#,##0.0"),
+        (39, "Equity operating FULL before debt remeasurement (information)",
+         "=" + _equity_formula([f"{get_column_letter(c)}32" for c in range(2, 7)]), "#,##0.0"),
+        (40, "Equity FULL A+B+C (operating path + debt remeasurement once)",
+         "=B39+B37", "#,##0.0"),
+    ]
+    for r, label, fxo, fmt in rows:
+        ws[f"A{r}"] = label
+        ws[f"B{r}"] = fxo
+        ws[f"B{r}"].number_format = fmt
+        style_formula(ws[f"B{r}"])
+
+    channels = [
+        (6, "A", "standalone", "Translation of foreign revenue", "=B35"),
+        (7, "B", "standalone", "Foreign-currency cost offset (natural hedge) + financial hedge", "=B36"),
+        (8, "C", "standalone", "Foreign-currency debt remeasurement in the net-debt bridge (once)", "=B38"),
+        (9, "D", "information", "Operating A+B before debt remeasurement (out of FULL)", "=B39"),
+        (10, "E", "information", "Debt remeasurement dollars (bridge, out of FULL as a row)", "=DCF!B28+B37"),
+        (11, "FULL", "cumulative", "A+B+C together (D/E information excluded)", "=B40"),
+    ]
+    for r, rowid, kind, channel, d_fx in channels:
+        ws.cell(r, 1, rowid)
+        ws.cell(r, 2, kind)
+        ws.cell(r, 3, channel)
+        ws.cell(r, 4, d_fx)
+        _proxy_cols(ws, r)
+        for c in range(1, 8):
+            ws.cell(r, c).border = THIN
+        if kind == "information":
+            ws.cell(r, 2).fill = INFO_FILL
+        if rowid == "FULL":
+            for c in range(1, 8):
+                ws.cell(r, c).font = BOLD
+    # Row 10 is a bit redundant with C; keep it as information so the table has the usual 6 rows.
+    # Actually E = C, that's a problem for the table. Let me leave E as a note-only duplicate...
+    # Better E: "Unhedged net operating exposure (information)" or drop uniqueness.
+    # I'll change E to not equal C. Already written. I'll fix in a follow-up if needed.
+    # Wait I should fix now: make E a diagnostic of unhedged exposure dollars, not equity.
+    # The channel table D column must be equity for %Δ to make sense. Keep E as information equity = base (placeholder)? Ugly.
+    # Use row 10 as diagnostic "home-currency change in FX debt (not an equity row)" - but then %Δ vs equity base is misleading.
+    # Pattern from rates: information rows still show an equity figure. I'll set E = DCF!B28 (no-op communication row) with a note? Wasteful.
+    # I'll make E "information: FX translation of cash (not modelled; out of FULL)" = DCF!B28, documenting cash is not remeasured.
+    ws["C10"] = "Cash remeasurement not modelled (out of FULL; cash kept at Inputs!B36)"
+    ws["D10"] = "=DCF!B28"
+    _proxy_cols(ws, 10)
+
+    ws["A13"] = "Own method base for %Δ"
+    ws["B13"] = "=DCF!B28"
+    ws["A14"] = "Blended mid (reference)"
+    ws["B14"] = "=DCF!B30"
+    for r in (13, 14):
+        ws[f"B{r}"].number_format = "#,##0.0"
+        style_formula(ws[f"B{r}"])
+    ws["A16"] = (
+        "FULL is sheet row 11. Financing is counted once in the net-debt bridge (channel C). "
+        "Shock input for tests: B21. This event is linear in the shock by construction."
+    )
+    ws["A17"] = "Never stack rates, commodity, tariff, capex or demand into this table. The shock is a permanent level shift (Y1–Y5 and terminal year)."
+    set_widths(ws, [8, 14, 62, 18, 14, 18, 14, 70])
+
+
+def _build_event_demand(wb: Workbook, dm: dict[str, Any]) -> None:
+    """Consumer-demand event: volume, price/mix, fixed-cost operating leverage, downside inventory."""
+    ws = wb.create_sheet("Event_Demand")
+    ws["A1"] = "EVENT: Consumer demand shock — ONE event (standalone / information / FULL)"
+    ws["A1"].font = TITLE
+    ws["A2"] = (
+        "The shock is a volume percentage change (enter the adverse direction, typically a fall). "
+        "FULL revenue = base × (1 + volume) × (1 + price/mix elasticity × volume), which is not a straight line. "
+        "A configured share of operating expenses stays fixed (operating leverage). Inventory cash use applies in Year-1 "
+        "only when volume falls. Draft, not investment advice."
+    )
+    ws["A2"].font = MUTED
+    ws["A2"].alignment = Alignment(wrap_text=True)
+    ws.merge_cells("A2:G3")
+    ws["A4"] = (
+        "Terms: NWC = net working capital; D&A = depreciation and amortisation; EBIT = earnings before interest and tax; "
+        "FCFF = free cash flow to the firm; %Δ = percentage change; $/sh = US dollars per diluted share. "
+        "Honest limit: with price/mix elasticity at 0 and no inventory overlay, dollar FCFF is linear in the volume shock "
+        "(fixed-cost leverage changes the slope but not the curvature), so the mirror is then symmetric. Asymmetry here "
+        "comes from the revenue product (1+v)×(1+εv) and from the downside-only inventory cash use."
+    )
+    ws["A4"].font = MUTED
+    headers = [
+        "Row", "Kind", "Channel",
+        "Stressed equity ($m, perp. method)", "%Δ vs own method base",
+        "Blended-mid sensitivity proxy ($m)", "Proxy $/sh diluted",
+    ]
+    for c, h in enumerate(headers, 1):
+        ws.cell(5, c, h)
+        ws.cell(5, c).font = HEADER
+        ws.cell(5, c).fill = LIGHT
+        ws.cell(5, c).border = THIN
+
+    ws["A20"] = "Consumer-demand event inputs"
+    ws["A20"].font = HEADER
+    ws["A20"].fill = LIGHT
+
+    def put(r, label, val, fmt, judgment=False, note=""):
+        ws[f"A{r}"] = label
+        ws[f"B{r}"] = val
+        ws[f"B{r}"].number_format = fmt
+        (style_judgment if judgment else style_input)(ws[f"B{r}"])
+        ws[f"C{r}"] = note
+        ws[f"C{r}"].font = MUTED
+
+    put(21, "Volume shock % (enter the adverse direction)", dm.get("volume_shock_pct", -0.15), "0.0%",
+        note="ILLUSTRATIVE; one event only. Typically negative. Grid and mirror scale this cell.")
+    put(22, "Price/mix elasticity (price %Δ per 1.0 volume %Δ)", dm.get("price_mix_elasticity", 0.20), "0.00", True,
+        "Judgment: positive means price/mix moves with volume (a volume fall also weakens mix)")
+    put(23, "Fixed-cost share of opex (operating expenses, including D&A)", dm.get("fixed_cost_share", 0.40), "0.0%", True,
+        "Judgment: this share of opex does not move with volume; the rest is variable")
+    put(24, "Inventory-to-sales ratio (Year-1 downside cash use)", dm.get("inventory_to_sales", 0.10), "0.0%", True,
+        "Judgment: Year-1 cash use = ratio × max(0, −volume shock) × Year-1 base revenue; zero when volume rises")
+
+    ws["A29"] = "Item"
+    for i, yr in enumerate([1, 2, 3, 4, 5], start=2):
+        ws.cell(29, i, f"Y{yr}").font = HEADER
+    _helper_demand_fcff(ws, 30, "$B$21", vol_on=True, price_on=False, leverage_on=False, inventory_on=False)
+    ws["A30"] = "FCFF A — volume on revenue only (opex at base; no price/mix, no leverage, no inventory overlay)"
+    _helper_demand_fcff(ws, 31, "$B$21", vol_on=False, price_on=True, leverage_on=False, inventory_on=False)
+    ws["A31"] = "FCFF B — price/mix only (base volume and costs)"
+    _helper_demand_fcff(ws, 32, "$B$21", vol_on=False, price_on=False, leverage_on=True, inventory_on=False)
+    ws["A32"] = "FCFF C — operating leverage only (fixed-cost share held; revenue at base)"
+    _helper_demand_fcff(ws, 33, "$B$21", vol_on=False, price_on=False, leverage_on=False, inventory_on=True)
+    ws["A33"] = "FCFF D — Year-1 downside inventory cash use only (operations at base)"
+    _helper_demand_fcff(ws, 34, "$B$21", vol_on=True, price_on=True, leverage_on=True, inventory_on=True)
+    ws["A34"] = "FCFF FULL — volume × price/mix revenue, leveraged opex, inventory overlay"
+
+    def eq(out_r, fcff_row, label):
+        ws[f"A{out_r}"] = label
+        ws[f"B{out_r}"] = "=" + _equity_formula([f"{get_column_letter(c)}{fcff_row}" for c in range(2, 7)])
+        ws[f"B{out_r}"].number_format = "#,##0.0"
+        style_formula(ws[f"B{out_r}"])
+
+    eq(36, 30, "Equity A standalone — volume on revenue only")
+    eq(37, 31, "Equity B standalone — price/mix only")
+    eq(38, 32, "Equity C standalone — fixed-cost operating leverage only")
+    eq(39, 33, "Equity D standalone — Year-1 downside inventory only")
+    eq(40, 34, "Equity FULL cumulative A+B+C+D")
+
+    channels = [
+        (6, "A", "standalone", "Volume (revenue units; opex held at base)", "=B36"),
+        (7, "B", "standalone", "Price / mix elasticity", "=B37"),
+        (8, "C", "standalone", "Operating leverage on fixed costs", "=B38"),
+        (9, "D", "standalone", "Inventory / working-capital effect (Year-1, volume fall only)", "=B39"),
+        (10, "E", "information", "Standard ΔNWC already follows stressed revenue in A/B/FULL (out of FULL as a row)", "=DCF!B28"),
+        (11, "FULL", "cumulative", "A+B+C+D together (E information excluded)", "=B40"),
+    ]
+    for r, rowid, kind, channel, d_fx in channels:
+        ws.cell(r, 1, rowid)
+        ws.cell(r, 2, kind)
+        ws.cell(r, 3, channel)
+        ws.cell(r, 4, d_fx)
+        _proxy_cols(ws, r)
+        for c in range(1, 8):
+            ws.cell(r, c).border = THIN
+        if kind == "information":
+            ws.cell(r, 2).fill = INFO_FILL
+        if rowid == "FULL":
+            for c in range(1, 8):
+                ws.cell(r, c).font = BOLD
+    ws["A13"] = "Own method base for %Δ"
+    ws["B13"] = "=DCF!B28"
+    ws["A14"] = "Blended mid (reference)"
+    ws["B14"] = "=DCF!B30"
+    for r in (13, 14):
+        ws[f"B{r}"].number_format = "#,##0.0"
+        style_formula(ws[f"B{r}"])
+    ws["A16"] = (
+        "FULL is sheet row 11. Shock input for tests: B21. Depreciation and amortisation (D&A) and capital expenditure "
+        "(capex) stay at base dollars (capacity is held). The inventory overlay is a Year-1 cash use inside FCFF, not a t0 net-debt restatement."
+    )
+    ws["A17"] = "Never stack rates, commodity, tariff, capex or FX into this table. The volume shock is a permanent level shift (Y1–Y5 and terminal year)."
+    set_widths(ws, [8, 14, 70, 18, 14, 18, 14, 70])
+
+
+
+def _tornado_layout(n: int) -> dict:
+    """Keep historical chart addresses (header 11, data from 13). Move the base-mid labels only when n > 3."""
+    last_ev = 4 + n
+    chart_hdr, chart_first = 11, 13
+    if n <= 3:
+        base_m, base_sh = 8, 9
+    else:
+        base_m = chart_first + n + 1
+        base_sh = base_m + 1
+    return {
+        "last_ev": last_ev,
+        "base_m": base_m,
+        "base_sh": base_sh,
+        "chart_hdr": chart_hdr,
+        "chart_first": chart_first,
+    }
+
+
+def _envelope_minmax_rows(n: int) -> tuple[int, int]:
+    last = 5 + n
+    if n <= 3:
+        return 9, 10
+    return last + 1, last + 2
+
+
+FOOTBALL_BAND_ROWS = [8, 9, 11, 12, 13]
+
+
 def _build_tornado(wb: Workbook, event_list) -> None:
     tn = wb.create_sheet("Tornado")
     tn["A1"] = "Tornado — FULL-row blended-mid sensitivity proxies"
@@ -1581,6 +2065,7 @@ def _build_tornado(wb: Workbook, event_list) -> None:
         tn.cell(4, c).border = THIN
 
     n = len(event_list)
+    lay = _tornado_layout(n)
     for i, (sheet, label, _cfg) in enumerate(event_list):
         r = 5 + i
         tn[f"A{r}"] = label
@@ -1599,21 +2084,22 @@ def _build_tornado(wb: Workbook, event_list) -> None:
         tn.cell(r, 5).number_format = "#,##0.0"
         tn.cell(r, 6).number_format = "#,##0.0"
 
-    tn["A8"] = "Base blended mid ($m)"
-    tn["B8"] = "=DCF!B30"
-    tn["B8"].number_format = "#,##0.0"
-    style_formula(tn["B8"])
-    tn["A9"] = "Base blended mid ($/sh)"
-    tn["B9"] = "=DCF!B33"
-    tn["B9"].number_format = "0.00"
-    style_formula(tn["B9"])
+    bm, bs, ch = lay["base_m"], lay["base_sh"], lay["chart_hdr"]
+    tn[f"A{bm}"] = "Base blended mid ($m)"
+    tn[f"B{bm}"] = "=DCF!B30"
+    tn[f"B{bm}"].number_format = "#,##0.0"
+    style_formula(tn[f"B{bm}"])
+    tn[f"A{bs}"] = "Base blended mid ($/sh)"
+    tn[f"B{bs}"] = "=DCF!B33"
+    tn[f"B{bs}"].number_format = "0.00"
+    style_formula(tn[f"B{bs}"])
 
-    tn["A11"] = "Chart source (signed Δ vs blended mid)"
-    tn["A11"].font = HEADER
-    tn["A12"] = "Shock"
-    tn["B12"] = "Δ ($m)"
+    tn[f"A{ch}"] = "Chart source (signed Δ vs blended mid)"
+    tn[f"A{ch}"].font = HEADER
+    tn[f"A{ch + 1}"] = "Shock"
+    tn[f"B{ch + 1}"] = "Δ ($m)"
     for i in range(n):
-        r = 13 + i
+        r = lay["chart_first"] + i
         tn[f"A{r}"] = f"=A{5 + i}"
         tn[f"B{r}"] = f"=E{5 + i}"
         style_formula(tn[f"A{r}"])
@@ -1626,15 +2112,16 @@ def _build_tornado(wb: Workbook, event_list) -> None:
     chart.title = "Tornado — FULL blended-mid sensitivity proxy Δ"
     chart.y_axis.title = None
     chart.x_axis.title = "Δ vs blended mid ($m)"
-    data = Reference(tn, min_col=2, min_row=12, max_row=12 + n)
-    cats = Reference(tn, min_col=1, min_row=13, max_row=12 + n)
+    data = Reference(tn, min_col=2, min_row=ch + 1, max_row=ch + 1 + n)
+    cats = Reference(tn, min_col=1, min_row=lay["chart_first"], max_row=lay["chart_first"] + n - 1)
     chart.add_data(data, titles_from_data=True)
     chart.set_categories(cats)
     chart.shape = 4
     chart.legend = None
-    tn.add_chart(chart, "D11")
+    tn.add_chart(chart, f"D{ch}")
 
-    tn["A16"] = "Rule: never mix an exit-multiple FULL %Δ denominator with a perpetual-growth base in this tornado."
+    rule_row = 16 if n <= 3 else lay["base_sh"] + 2
+    tn[f"A{rule_row}"] = "Rule: never mix an exit-multiple FULL %Δ denominator with a perpetual-growth base in this tornado."
     set_widths(tn, [22, 14, 18, 12, 20, 14])
 
 
@@ -1665,27 +2152,30 @@ def _build_envelope(wb: Workbook, event_list) -> None:
         env[f"B{r}"] = f"=Tornado!C{5 + i}"
         env[f"C{r}"] = f"=Tornado!D{5 + i}"
     last = 5 + len(event_list)
-    env["A9"] = "Envelope MIN"
-    env["B9"] = f"=MIN(B5:B{last})"
-    env["C9"] = f"=MIN(C5:C{last})"
-    env["A10"] = "Envelope MAX"
-    env["B10"] = f"=MAX(B5:B{last})"
-    env["C10"] = f"=MAX(C5:C{last})"
+    mn, mx = _envelope_minmax_rows(len(event_list))
+    env[f"A{mn}"] = "Envelope MIN"
+    env[f"B{mn}"] = f"=MIN(B5:B{last})"
+    env[f"C{mn}"] = f"=MIN(C5:C{last})"
+    env[f"A{mx}"] = "Envelope MAX"
+    env[f"B{mx}"] = f"=MAX(B5:B{last})"
+    env[f"C{mx}"] = f"=MAX(C5:C{last})"
 
-    for r in list(range(5, last + 1)) + [9, 10]:
+    for r in list(range(5, last + 1)) + [mn, mx]:
         for c in range(1, 4):
             env.cell(r, c).border = THIN
         style_formula(env.cell(r, 2))
         style_formula(env.cell(r, 3))
         env.cell(r, 2).number_format = "#,##0.0"
         env.cell(r, 3).number_format = "0.00"
-    env["A9"].font = BOLD
-    env["A10"].font = BOLD
+    env[f"A{mn}"].font = BOLD
+    env[f"A{mx}"].font = BOLD
     set_widths(env, [28, 14, 14])
 
 
 def _football_last_row(event_list) -> int:
-    return 11 if len(event_list) > 2 else 10
+    n = len(event_list)
+    last_band = FOOTBALL_BAND_ROWS[n - 1] if n else 10
+    return max(10, last_band)
 
 
 def _build_football(wb: Workbook, event_list) -> None:
@@ -1725,10 +2215,9 @@ def _build_football(wb: Workbook, event_list) -> None:
     fb["D7"] = "=DCF!B33"
     fb["E7"] = "Blend lock — no stress rows inside the average"
 
-    # Event bands: rows 8, 9 for the first two events; envelope stays on row 10; a third event uses row 11.
-    band_rows = [8, 9, 11]
+    # Event bands: rows 8, 9 for the first two events; envelope stays on row 10; further events use 11+.
     for i, (sheet, _label, _cfg) in enumerate(event_list):
-        r = band_rows[i]
+        r = FOOTBALL_BAND_ROWS[i]
         t = 5 + i
         fb[f"A{r}"] = f"{sheet.replace('Event_', '')} FULL stress band (proxy)"
         fb[f"B{r}"] = f"=MIN(DCF!B33,Tornado!D{t})"
@@ -1736,10 +2225,11 @@ def _build_football(wb: Workbook, event_list) -> None:
         fb[f"D{r}"] = f"=MAX(DCF!B33,Tornado!D{t})"
         fb[f"E{r}"] = f"Blended-mid sensitivity proxy from {sheet} FULL"
 
+    mn, mx = _envelope_minmax_rows(len(event_list))
     fb["A10"] = "Envelope band"
-    fb["B10"] = "=Envelope!C9"
+    fb["B10"] = f"=Envelope!C{mn}"
     fb["C10"] = "=DCF!B33"
-    fb["D10"] = "=Envelope!C10"
+    fb["D10"] = f"=Envelope!C{mx}"
     fb["E10"] = "MIN/MAX of base and FULL proxies"
 
     last = _football_last_row(event_list)
@@ -1756,17 +2246,20 @@ def _build_football(wb: Workbook, event_list) -> None:
         fb.cell(r, 6).number_format = "0.00"
         fb.cell(r, 7).number_format = "0.00"
 
-    fb["A12"] = "Raw weighted average cost of capital (WACC) — reference, outside blend"
-    fb["B12"] = "=Inputs!B45"
-    fb["B12"].number_format = "0.00%"
-    style_formula(fb["B12"])
-    fb["C12"] = "Shown live when a yellow judgment WACC override is used — outside the blend"
-    fb["C12"].fill = YELLOW
-    fb["C12"].font = BLUE
+    # Keep the WACC / diluted-share notes and the chart on their historical rows when there are
+    # three or fewer events (last <= 11). Shift them down once a fourth event occupies row 12.
+    wacc_row, shares_row, chart_row = (12, 14, 16) if last <= 11 else (last + 2, last + 4, last + 6)
+    fb[f"A{wacc_row}"] = "Raw weighted average cost of capital (WACC) — reference, outside blend"
+    fb[f"B{wacc_row}"] = "=Inputs!B45"
+    fb[f"B{wacc_row}"].number_format = "0.00%"
+    style_formula(fb[f"B{wacc_row}"])
+    fb[f"C{wacc_row}"] = "Shown live when a yellow judgment WACC override is used — outside the blend"
+    fb[f"C{wacc_row}"].fill = YELLOW
+    fb[f"C{wacc_row}"].font = BLUE
 
-    fb["A14"] = "Diluted shares (million)"
-    fb["B14"] = "=Inputs!B39"
-    style_formula(fb["B14"])
+    fb[f"A{shares_row}"] = "Diluted shares (million)"
+    fb[f"B{shares_row}"] = "=Inputs!B39"
+    style_formula(fb[f"B{shares_row}"])
 
     chart = BarChart()
     chart.type = "bar"
@@ -1784,7 +2277,7 @@ def _build_football(wb: Workbook, event_list) -> None:
     s0 = chart.series[0]
     s0.graphicalProperties = GraphicalProperties(noFill=True)
     s0.graphicalProperties.line = LineProperties(noFill=True)
-    fb.add_chart(chart, "A16")
+    fb.add_chart(chart, f"A{chart_row}")
 
     set_widths(fb, [40, 12, 12, 12, 55, 14, 12])
 
@@ -1802,7 +2295,7 @@ def _build_summary(wb: Workbook, event_list) -> None:
     )
     sm["A2"].font = MUTED
     sm["A2"].alignment = Alignment(wrap_text=True)
-    sm.merge_cells("A2:K3")
+    sm.merge_cells("A2:O3")
     sm.row_dimensions[2].height = 30
 
     n = len(event_list)
@@ -1810,7 +2303,9 @@ def _build_summary(wb: Workbook, event_list) -> None:
     first, last = h0 + 1, h0 + n
     hdr = ["Rank", "Event", "Sheet", "Configured shock", "FULL $/sh down-case", "FULL $/sh up-case",
            "%Δ at configured shock", "Δ $/sh at configured shock", INTERACTION_LABEL + " ($/sh)",
-           "Asymmetry ($/sh)", "Reverse-stress result (shock)"]
+           "Asymmetry ($/sh)", "Reverse-stress result (shock)",
+           "Net debt / Year-1 EBITDA at configured", "Covenant flag at configured",
+           "Net debt / Year-1 EBITDA at mirror", "Covenant flag at mirror"]
     for c, h in enumerate(hdr, 1):
         sm.cell(4, c, h).font = HEADER
         sm.cell(4, c).fill = LIGHT
@@ -1823,7 +2318,9 @@ def _build_summary(wb: Workbook, event_list) -> None:
     sm[f"A{h0 - 1}"].font = HEADER
     src_hdr = ["Event", "Sheet", "Configured shock", "FULL $/sh @ configured", "FULL $/sh @ mirrored",
                "%Δ @ configured", "Δ $/sh @ configured", INTERACTION_LABEL + " ($/sh)", "Asymmetry ($/sh)",
-               "Reverse-stress result", "Rank key (|Δ $/sh|, tie-break by row)"]
+               "Reverse-stress result", "Net debt / Year-1 EBITDA @ configured", "Covenant flag @ configured",
+               "Net debt / Year-1 EBITDA @ mirrored", "Covenant flag @ mirrored",
+               "Rank key (|Δ $/sh|, tie-break by row)"]
     for c, h in enumerate(src_hdr, 1):
         sm.cell(h0, c, h).font = HEADER
         sm.cell(h0, c).border = THIN
@@ -1843,16 +2340,21 @@ def _build_summary(wb: Workbook, event_list) -> None:
         sm[f"H{r}"] = f"={sheet}!G{ROW_INTERACTION}"
         sm[f"I{r}"] = f"={sheet}!G{ROW_MIRROR_ASYM}"
         sm[f"J{r}"] = f"={sheet}!B{ROW_REV_RESULT}"
-        sm[f"K{r}"] = f"=ABS(G{r})-ROW()/1000000000"
+        sm[f"K{r}"] = f"={sheet}!K{ROW_MIRROR_CONF}"
+        sm[f"L{r}"] = f"={sheet}!M{ROW_MIRROR_CONF}"
+        sm[f"M{r}"] = f"={sheet}!K{ROW_MIRROR_MIRROR}"
+        sm[f"N{r}"] = f"={sheet}!M{ROW_MIRROR_MIRROR}"
+        sm[f"O{r}"] = f"=ABS(G{r})-ROW()/1000000000"
         for c, fmt in (("C", "@"), ("D", "0.00"), ("E", "0.00"), ("F", "0.0%"), ("G", "0.00"),
-                       ("H", "0.00"), ("I", "0.00"), ("J", spec["fmt"]), ("K", "0.000000")):
-            if c != "C":
+                       ("H", "0.00"), ("I", "0.00"), ("J", spec["fmt"]), ("K", "0.00"),
+                       ("L", "@"), ("M", "0.00"), ("N", "@"), ("O", "0.000000")):
+            if c not in ("C", "L", "N"):
                 sm[f"{c}{r}"].number_format = fmt
             style_formula(sm[f"{c}{r}"])
-        for c in range(1, 12):
+        for c in range(1, 16):
             sm.cell(r, c).border = THIN
 
-    keys = f"$K${first}:$K${last}"
+    keys = f"$O${first}:$O${last}"
     for k in range(1, n + 1):
         r = 4 + k
         sm[f"A{r}"] = k
@@ -1869,27 +2371,34 @@ def _build_summary(wb: Workbook, event_list) -> None:
         sm[f"I{r}"] = f"={pick('H')}"
         sm[f"J{r}"] = f"={pick('I')}"
         sm[f"K{r}"] = f"={pick('J')}"
+        sm[f"L{r}"] = f"={pick('K')}"
+        sm[f"M{r}"] = f"={pick('L')}"
+        sm[f"N{r}"] = f"={pick('M')}"
+        sm[f"O{r}"] = f"={pick('N')}"
         for c, fmt in (("E", "0.00"), ("F", "0.00"), ("G", "0.0%"), ("H", "0.00"), ("I", "0.00"),
-                       ("J", "0.00"), ("K", "General")):
+                       ("J", "0.00"), ("K", "General"), ("L", "0.00"), ("M", "General"),
+                       ("N", "0.00"), ("O", "General")):
             sm[f"{c}{r}"].number_format = fmt
-        for c in range(2, 12):
+        for c in range(2, 16):
             style_formula(sm.cell(r, c))
-        for c in range(1, 12):
+        for c in range(1, 16):
             sm.cell(r, c).border = THIN
 
-    sm["A9"] = "Base blended mid ($/sh)"
-    sm["B9"] = "=DCF!B33"
-    sm["B9"].number_format = "0.00"
-    style_formula(sm["B9"])
-    sm["A10"] = (
+    foot = 9 if n <= 4 else 4 + n + 1
+    sm[f"A{foot}"] = "Base blended mid ($/sh)"
+    sm[f"B{foot}"] = "=DCF!B33"
+    sm[f"B{foot}"].number_format = "0.00"
+    style_formula(sm[f"B{foot}"])
+    sm[f"A{foot + 1}"] = (
         "Down-case / up-case = lower / higher of the configured and mirrored FULL proxies. Reverse-stress result = "
         "smallest tested shock that takes the FULL proxy $/sh below the yellow threshold on that event sheet "
-        "(default threshold = base × (1 − 25%); n/a when the drop % or threshold is blank). Ranking uses the LARGE and INDEX/MATCH spreadsheet functions (Excel and LibreOffice)."
+        "(default threshold = base × (1 − 25%); n/a when the drop % or threshold is blank). Ranking uses the LARGE and INDEX/MATCH spreadsheet functions (Excel and LibreOffice). "
+        "The covenant columns compare net debt / Year-1 EBITDA (earnings before interest, tax, depreciation and amortisation = EBIT + D&A) with the limit on Inputs; blank limit = n/a. Outside the blend."
     )
-    sm["A10"].font = MUTED
-    sm["A10"].alignment = Alignment(wrap_text=True)
-    sm.merge_cells("A10:K11")
-    set_widths(sm, [26, 26, 16, 14, 14, 14, 14, 14, 14, 14, 18])
+    sm[f"A{foot + 1}"].font = MUTED
+    sm[f"A{foot + 1}"].alignment = Alignment(wrap_text=True)
+    sm.merge_cells(f"A{foot + 1}:O{foot + 2}")
+    set_widths(sm, [26, 26, 16, 14, 14, 14, 14, 14, 14, 14, 18, 16, 14, 16, 14])
 
 
 def _build_passthrough(wb: Workbook, pt: dict[str, Any]) -> None:
@@ -2014,14 +2523,19 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         notes.append("Event_Tariff: units × price × unit cost bridge, fixed cost separate. A unit cost (standalone); B, C, D cumulative steps adding pass-through, demand elasticity and markdowns; E diagnostic 100% pass-through posture; FULL adds sourcing mitigation. Pass-through counted once.")
     if "Event_Capex" in sheets:
         notes.append("Event_Capex: one customer capex shock. A own revenue via yellow elasticity; B own capex via yellow response; C financing mix — the funding need (PV of incremental own capex, floored at 0) is raised once at t0: the equity part lowers net debt and adds diluted shares at the yellow issue price in the same step, the debt part adds debt and cash equally. FULL = A+B+C, measured per pre-event share; D/E information rows are outside FULL.")
+    if "Event_FX" in sheets:
+        notes.append("Event_FX: one foreign-exchange (FX) shock, entered as a home-currency appreciation (positive = the home currency strengthens). A translation of foreign revenue; B foreign-currency cost offset (natural hedge) plus a financial hedge on a yellow share of foreign revenue, counted once; C foreign-currency debt remeasurement in the net-debt bridge, once, not inside FCFF. FULL = A+B+C. This event is linear in the shock by construction (every channel scales in proportion to the shock), so the up and down cases mirror; do not claim FX non-linearity from this workbook. Cash is not remeasured.")
+    if "Event_Demand" in sheets:
+        notes.append("Event_Demand: one consumer-demand / volume shock (entered in the adverse direction, typically a fall). A volume on revenue only; B price/mix elasticity (price %Δ per volume %Δ); C operating leverage — a yellow share of opex, which includes D&A, stays fixed; D Year-1 inventory cash use that applies only when volume falls (inside FCFF, not a t0 net-debt restatement). FULL revenue = base × (1 + volume) × (1 + elasticity × volume). Honest limit: with the elasticity at zero and no inventory overlay, dollar FCFF is linear in the volume shock (fixed-cost leverage changes the slope but not the curvature), so the mirror is then symmetric. Asymmetry in this workbook comes from the revenue product and from the downside-only inventory cash use. D&A and capex stay at base dollars (capacity is held).")
     notes += [
         "%Δ (percentage change): each FULL versus its own perpetual-growth method base, then × blended mid → blended-mid sensitivity proxy.",
         "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that and the Ladder sheet. On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
         "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
+        "Covenant row (columns I–M of the mirror rows, and on the Summary): net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. This is a diagnostic, outside FULL and the blend. EBITDA = EBIT + D&A, matching the model's existing definition (DCF Year-5 EBITDA on DCF!B20 uses the same add-back; opex already includes D&A, which is added back so it is not subtracted twice). A non-positive EBITDA, or a ratio above the limit, is BREACH.",
         "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. If no tested shock breaks the threshold, the cell reads 'Not reached: worst is -X% at …' with the worst fall and shock on the grid. No goal seek, no macros.",
-        "Shock calibration (rows 54–57): yellow source and basis cells for each shock size (for example a historical 1-year 95th percentile move). Shipped as TO FILL; never invent a statistic.",
+        "Shock calibration (rows 54–58): yellow source, basis and severity cells for each shock size (for example a historical 1-year 95th percentile move, labelled plausible, severe or extreme). Shipped as TO FILL; never invent a statistic.",
         "Ladder sheet: each event's FULL re-run at yellow multiples of its configured shock (default −1.5× to +1.5×), both directions, via helper rows 90–97 on each event sheet. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a check cell. The reverse stress test there interpolates the shock that cuts FULL equity by each yellow % target; scripts/reverse_stress.py solves it exactly.",
-        "Summary sheet: ranks every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas; shows down-case / up-case, %Δ, interaction, asymmetry and reverse-stress result. Outside the blend.",
+        "Summary sheet: ranks every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas; shows down-case / up-case, %Δ, interaction, asymmetry, reverse-stress result and the covenant ratio / flag. Outside the blend.",
         "PassThrough: units × price × unit cost with fixed cost separate; invariant at 100% pass-through and zero elasticity/markdowns/mitigation.",
         "Review: run REVIEW_CHECKLIST.md and write CLEAR or BLOCK.",
     ]
