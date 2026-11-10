@@ -59,6 +59,19 @@ class ModelInputs:
     capex_own_response: float | None = None
     capex_equity_share: float | None = None
     capex_issue_price: float | None = None
+    # FX event (optional)
+    fx_shock: float | None = None
+    fx_rev_share: float | None = None
+    fx_cost_share: float | None = None
+    fx_debt_share: float | None = None
+    fx_hedge_ratio: float | None = None
+    # demand event (optional)
+    demand_shock: float | None = None
+    demand_price_elast: float | None = None
+    demand_fixed_share: float | None = None
+    demand_inventory: float | None = None
+    # covenant (optional; None = n/a)
+    covenant_limit: float | None = None
 
 
 def _num(v: Any, default: float | None = None) -> float | None:
@@ -98,6 +111,22 @@ def load_inputs_from_workbook(path) -> ModelInputs:
         cxk = _num(ex["B23"].value)
         cxq = _num(ex["B24"].value)
         cxp = _num(ex["B25"].value)
+    fxs = fxr = fxc = fxd = fxh = None
+    if "Event_FX" in wb.sheetnames:
+        ef = wb["Event_FX"]
+        fxs = _num(ef["B21"].value)
+        fxr = _num(ef["B22"].value)
+        fxc = _num(ef["B23"].value)
+        fxd = _num(ef["B24"].value)
+        fxh = _num(ef["B25"].value)
+    dms = dme = dmf = dmi = None
+    if "Event_Demand" in wb.sheetnames:
+        ed = wb["Event_Demand"]
+        dms = _num(ed["B21"].value)
+        dme = _num(ed["B22"].value)
+        dmf = _num(ed["B23"].value)
+        dmi = _num(ed["B24"].value)
+    cov = _num(b("B52"))
 
     mi = ModelInputs(
         revenue_y0=float(b("B5")),
@@ -140,6 +169,16 @@ def load_inputs_from_workbook(path) -> ModelInputs:
         capex_own_response=cxk,
         capex_equity_share=cxq,
         capex_issue_price=cxp,
+        fx_shock=fxs,
+        fx_rev_share=fxr,
+        fx_cost_share=fxc,
+        fx_debt_share=fxd,
+        fx_hedge_ratio=fxh,
+        demand_shock=dms,
+        demand_price_elast=dme,
+        demand_fixed_share=dmf,
+        demand_inventory=dmi,
+        covenant_limit=cov,
     )
     wb.close()
     return mi
@@ -390,6 +429,172 @@ def capex_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
     return capex_components(m, shock)["full"]
 
 
+def _fx_fcff(m: ModelInputs, x: float, *, rev_on: bool, cost_on: bool, hedge_on: bool) -> list[float]:
+    fr = float(m.fx_rev_share)
+    fc = float(m.fx_cost_share)
+    h = float(m.fx_hedge_ratio)
+    out: list[float] = []
+    prev = m.revenue_y0
+    for t in range(1, 6):
+        base_rev = m.revenue_y0 * ((1.0 + m.growth) ** t)
+        rev = base_rev * (1.0 - fr * x) if rev_on else base_rev
+        opex = base_rev * m.opex_pct * ((1.0 - fc * x) if cost_on else 1.0)
+        hedge = (h * fr * base_rev * x) if hedge_on else 0.0
+        royalty = rev * m.royalty_rate
+        nopat = (rev - opex - royalty + hedge) * (1.0 - m.tax)
+        da = base_rev * m.da_pct
+        capex = base_rev * m.capex_pct
+        dnwc = -(rev - prev) * m.nwc_pct
+        prev = rev
+        out.append(nopat + da - capex + dnwc)
+    return out
+
+
+def fx_components(m: ModelInputs, shock: float | None = None) -> dict[str, float]:
+    assert m.fx_rev_share is not None, "Event_FX inputs missing"
+    x = float(m.fx_shock) if shock is None else shock
+    w = selected_wacc(m)
+    nd = net_debt(m)
+    g = m.terminal_g
+    a = equity_from_fcff(_fx_fcff(m, x, rev_on=True, cost_on=False, hedge_on=False), w, g, nd)
+    b = equity_from_fcff(_fx_fcff(m, x, rev_on=False, cost_on=True, hedge_on=True), w, g, nd)
+    ops = equity_from_fcff(_fx_fcff(m, x, rev_on=True, cost_on=True, hedge_on=True), w, g, nd)
+    debt_mtm = float(m.fx_debt_share) * m.gross_debt * x
+    c = base_equity_perp(m) + debt_mtm
+    full = ops + debt_mtm
+    return {"A": a, "B": b, "C": c, "ops": ops, "full": full, "debt_mtm": debt_mtm}
+
+
+def fx_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
+    return fx_components(m, shock)["full"]
+
+
+def _demand_fcff(
+    m: ModelInputs, x: float, *, vol_on: bool, price_on: bool, leverage_on: bool, inventory_on: bool,
+) -> list[float]:
+    e = float(m.demand_price_elast)
+    fshare = float(m.demand_fixed_share)
+    inv = float(m.demand_inventory)
+    out: list[float] = []
+    prev = m.revenue_y0
+    rev1_base = m.revenue_y0 * (1.0 + m.growth)
+    for t in range(1, 6):
+        base_rev = m.revenue_y0 * ((1.0 + m.growth) ** t)
+        vol = (1.0 + x) if vol_on else 1.0
+        price = (1.0 + e * x) if price_on else 1.0
+        rev = base_rev * vol * price
+        if leverage_on:
+            opex = base_rev * m.opex_pct * (fshare + (1.0 - fshare) * (1.0 + x))
+        else:
+            opex = base_rev * m.opex_pct
+        royalty = rev * m.royalty_rate
+        nopat = (rev - opex - royalty) * (1.0 - m.tax)
+        da = base_rev * m.da_pct
+        capex = base_rev * m.capex_pct
+        dnwc = -(rev - prev) * m.nwc_pct
+        prev = rev
+        inventory = (-inv * max(0.0, -x) * rev1_base) if (inventory_on and t == 1) else 0.0
+        out.append(nopat + da - capex + dnwc + inventory)
+    return out
+
+
+def demand_components(m: ModelInputs, shock: float | None = None) -> dict[str, float]:
+    assert m.demand_price_elast is not None, "Event_Demand inputs missing"
+    x = float(m.demand_shock) if shock is None else shock
+    w = selected_wacc(m)
+    nd = net_debt(m)
+    g = m.terminal_g
+    a = equity_from_fcff(_demand_fcff(m, x, vol_on=True, price_on=False, leverage_on=False, inventory_on=False), w, g, nd)
+    b = equity_from_fcff(_demand_fcff(m, x, vol_on=False, price_on=True, leverage_on=False, inventory_on=False), w, g, nd)
+    c = equity_from_fcff(_demand_fcff(m, x, vol_on=False, price_on=False, leverage_on=True, inventory_on=False), w, g, nd)
+    d = equity_from_fcff(_demand_fcff(m, x, vol_on=False, price_on=False, leverage_on=False, inventory_on=True), w, g, nd)
+    full = equity_from_fcff(_demand_fcff(m, x, vol_on=True, price_on=True, leverage_on=True, inventory_on=True), w, g, nd)
+    return {"A": a, "B": b, "C": c, "D": d, "full": full}
+
+
+def demand_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
+    return demand_components(m, shock)["full"]
+
+
+def year1_base(m: ModelInputs) -> tuple[float, float, float, float]:
+    """Year-1 base revenue, opex, EBIT, EBITDA (EBIT + D&A)."""
+    rev = m.revenue_y0 * (1.0 + m.growth)
+    opex = rev * m.opex_pct
+    roy = rev * m.royalty_rate
+    ebit = rev - opex - roy
+    da = rev * m.da_pct
+    return rev, opex, ebit, ebit + da
+
+
+def covenant_at(m: ModelInputs, sheet: str, shock: float) -> dict[str, float | str]:
+    """Independent net debt, Year-1 EBITDA, ratio and PASS/BREACH/n/a flag at `shock`."""
+    rev1, opex1, _ebit1, ebitda1 = year1_base(m)
+    nd = net_debt(m)
+    if sheet == "Event_Rates":
+        ebitda = ebitda1
+        nd = nd - m.duration * m.gross_debt * (1.0 - m.floating_share) * (shock / 10000.0)
+    elif sheet == "Event_Commodity":
+        rev = rev1 * (1.0 + shock)
+        opex = opex1 * (1.0 + m.cost_elasticity * shock)
+        roy = rev * m.royalty_rate
+        ebitda = (rev - opex - roy) + (rev1 * m.da_pct)
+    elif sheet == "Event_Tariff":
+        deltas = _tariff_delta_nopat_years(
+            m,
+            pass_through=float(m.tariff_pass_through),
+            elasticity=float(m.tariff_elasticity),
+            markdown=float(m.tariff_markdown),
+            mitigation=float(m.tariff_mitigation),
+            cost_shock=shock,
+        )
+        dgp = deltas[0] / (1.0 - m.tax)
+        ebitda = ebitda1 + dgp
+    elif sheet == "Event_Capex":
+        e = float(m.capex_rev_elasticity)
+        k = float(m.capex_own_response)
+        rev = rev1 * (1.0 + e * shock)
+        ebit = rev * (1.0 - m.opex_pct - m.royalty_rate)
+        ebitda = ebit + (rev1 * m.da_pct)
+        w = selected_wacc(m)
+        pv_inc = sum(
+            m.revenue_y0 * ((1.0 + m.growth) ** t) * m.capex_pct * k * shock / ((1.0 + w) ** t)
+            for t in range(1, 6)
+        )
+        need = max(0.0, pv_inc)
+        nd = nd - float(m.capex_equity_share) * need
+    elif sheet == "Event_FX":
+        fr, fc, h, fd = (float(m.fx_rev_share), float(m.fx_cost_share),
+                         float(m.fx_hedge_ratio), float(m.fx_debt_share))
+        rev = rev1 * (1.0 - fr * shock)
+        opex = opex1 * (1.0 - fc * shock)
+        hedge = h * fr * rev1 * shock
+        roy = rev * m.royalty_rate
+        ebitda = (rev - opex - roy + hedge) + (rev1 * m.da_pct)
+        nd = nd - fd * m.gross_debt * shock
+    elif sheet == "Event_Demand":
+        e, fshare = float(m.demand_price_elast), float(m.demand_fixed_share)
+        rev = rev1 * (1.0 + shock) * (1.0 + e * shock)
+        opex = opex1 * (fshare + (1.0 - fshare) * (1.0 + shock))
+        roy = rev * m.royalty_rate
+        ebitda = (rev - opex - roy) + (rev1 * m.da_pct)
+    else:
+        raise ValueError(sheet)
+    if ebitda <= 0:
+        ratio = None
+        ratio_label = "n/m"
+    else:
+        ratio = nd / ebitda
+        ratio_label = ratio
+    limit = m.covenant_limit
+    if limit is None:
+        flag = "n/a"
+    elif ebitda <= 0 or (ratio is not None and ratio > limit):
+        flag = "BREACH"
+    else:
+        flag = "PASS"
+    return {"nd": nd, "ebitda": ebitda, "ratio": ratio, "ratio_label": ratio_label, "flag": flag}
+
+
 def full_at(m: ModelInputs, sheet: str, shock: float) -> float:
     """Independent FULL equity for `sheet` at an arbitrary shock in that sheet's units (bp for rates)."""
     if sheet == "Event_Rates":
@@ -400,6 +605,10 @@ def full_at(m: ModelInputs, sheet: str, shock: float) -> float:
         return tariff_joint_equity(m, shock)
     if sheet == "Event_Capex":
         return capex_joint_equity(m, shock)
+    if sheet == "Event_FX":
+        return fx_joint_equity(m, shock)
+    if sheet == "Event_Demand":
+        return demand_joint_equity(m, shock)
     raise ValueError(sheet)
 
 
@@ -409,6 +618,8 @@ def configured_shock(m: ModelInputs, sheet: str) -> float:
         "Event_Commodity": m.commodity_shock,
         "Event_Tariff": m.tariff_cost_shock,
         "Event_Capex": m.capex_shock,
+        "Event_FX": m.fx_shock,
+        "Event_Demand": m.demand_shock,
     }[sheet]
 
 
@@ -432,10 +643,16 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
     wb_second = wb[second_sheet]["D11"].value
     has_capex = "Event_Capex" in wb.sheetnames
     wb_capex = wb["Event_Capex"]["D11"].value if has_capex else None
-    wb_env_lo = wb["Envelope"]["B9"].value
-    wb_env_hi = wb["Envelope"]["B10"].value
-    wb_env_lo_sh = wb["Envelope"]["C9"].value
-    wb_env_hi_sh = wb["Envelope"]["C10"].value
+    has_fx = "Event_FX" in wb.sheetnames
+    wb_fx = wb["Event_FX"]["D11"].value if has_fx else None
+    has_demand = "Event_Demand" in wb.sheetnames
+    wb_demand = wb["Event_Demand"]["D11"].value if has_demand else None
+    n_events = 1 + (1 if second_sheet else 0) + int(has_capex) + int(has_fx) + int(has_demand)
+    env_mn, env_mx = envelope_minmax_rows(n_events)
+    wb_env_lo = wb["Envelope"][f"B{env_mn}"].value
+    wb_env_hi = wb["Envelope"][f"B{env_mx}"].value
+    wb_env_lo_sh = wb["Envelope"][f"C{env_mn}"].value
+    wb_env_hi_sh = wb["Envelope"][f"C{env_mx}"].value
     wb_fb_lo = wb["Football"]["B10"].value
     wb_fb_hi = wb["Football"]["D10"].value
     wb.close()
@@ -498,6 +715,24 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
         else:
             details.append("capex FULL reconciliation OK")
 
+    if has_fx:
+        ind["fx"] = fx_joint_equity(m)
+        details.append(f"fx FULL ref={ind['fx']:.6f} workbook={wb_fx}")
+        if wb_fx is None or abs(ind["fx"] - float(wb_fx)) > max(tol_abs, abs(float(wb_fx)) * tol_rel):
+            failures.append(f"fx FULL reconciliation: ref {ind['fx']} != workbook {wb_fx}")
+        else:
+            details.append("fx FULL reconciliation OK")
+
+    if has_demand:
+        ind["demand"] = demand_joint_equity(m)
+        details.append(f"demand FULL ref={ind['demand']:.6f} workbook={wb_demand}")
+        if wb_demand is None or abs(ind["demand"] - float(wb_demand)) > max(
+            tol_abs, abs(float(wb_demand)) * tol_rel
+        ):
+            failures.append(f"demand FULL reconciliation: ref {ind['demand']} != workbook {wb_demand}")
+        else:
+            details.append("demand FULL reconciliation OK")
+
     # Independent blended proxies for envelope (every enabled event)
     proxies = {
         "base": ref_blend,
@@ -506,6 +741,10 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
     }
     if has_capex:
         proxies["capex"] = blended_proxy(ind["capex"], m)
+    if has_fx:
+        proxies["fx"] = blended_proxy(ind["fx"], m)
+    if has_demand:
+        proxies["demand"] = blended_proxy(ind["demand"], m)
     ind_env_lo = min(proxies.values())
     ind_env_hi = max(proxies.values())
     details.append(
@@ -541,11 +780,11 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
         )
     if wb_env_lo_sh is not None and abs(float(wb_env_lo_sh) - float(wb_fb_lo or 0)) > 1e-9:
         failures.append(
-            f"Football!B10 {wb_fb_lo} != Envelope!C9 {wb_env_lo_sh}"
+            f"Football!B10 {wb_fb_lo} != Envelope!C{env_mn} {wb_env_lo_sh}"
         )
     if wb_env_hi_sh is not None and abs(float(wb_env_hi_sh) - float(wb_fb_hi or 0)) > 1e-9:
         failures.append(
-            f"Football!D10 {wb_fb_hi} != Envelope!C10 {wb_env_hi_sh}"
+            f"Football!D10 {wb_fb_hi} != Envelope!C{env_mx} {wb_env_hi_sh}"
         )
     if not any("Football" in f for f in failures):
         details.append("Football envelope band matches envelope $/sh OK")
@@ -577,6 +816,33 @@ LADDER_N_RUNGS = 7
 LADDER_N_TARGETS = 2
 
 
+def envelope_minmax_rows(n: int) -> tuple[int, int]:
+    last = 5 + n
+    if n <= 3:
+        return 9, 10
+    return last + 1, last + 2
+
+
+def tornado_layout(n: int) -> dict:
+    last_ev = 4 + n
+    chart_hdr, chart_first = 11, 13
+    if n <= 3:
+        base_m, base_sh = 8, 9
+    else:
+        base_m = chart_first + n + 1
+        base_sh = base_m + 1
+    return {"last_ev": last_ev, "base_m": base_m, "base_sh": base_sh,
+            "chart_hdr": chart_hdr, "chart_first": chart_first}
+
+
+FOOTBALL_BAND_ROWS = [8, 9, 11, 12, 13]
+
+
+def football_last_row(n: int) -> int:
+    last_band = FOOTBALL_BAND_ROWS[n - 1] if n else 10
+    return max(10, last_band)
+
+
 def ladder_layout(n_events: int) -> dict:
     blocks = []
     for k in range(n_events):
@@ -588,7 +854,9 @@ def ladder_layout(n_events: int) -> dict:
 
 
 def event_sheets(sheetnames) -> list[str]:
-    return [s for s in sheetnames if s in ("Event_Rates", "Event_Commodity", "Event_Tariff", "Event_Capex")]
+    return [s for s in sheetnames if s in (
+        "Event_Rates", "Event_Commodity", "Event_Tariff", "Event_Capex", "Event_FX", "Event_Demand",
+    )]
 
 
 def interpolate_reverse(grid: list[float], pct: list[float], target: float):
