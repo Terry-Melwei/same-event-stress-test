@@ -4,7 +4,7 @@ Use this checklist to review (gate) a valuation workbook before anyone relies on
 The verdict is **CLEAR** only if every Blocking check passes. Otherwise it is **BLOCK**, with a numbered list of fixes that cites cells.
 CLEAR means the workbook is built correctly. It does not mean the valuation assumptions are endorsed.
 
-Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow to firm. EV = enterprise value. GP = gross profit. Capex = capital expenditure. PV = present value. $/sh = US dollars per diluted share. %Δ = percentage change. FULL row = the result of one event with all of its channels applied together. INT row = the interaction diagnostic (FULL minus the standalone channel rows).
+Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow to firm. EV = enterprise value. GP = gross profit. Capex = capital expenditure. PV = present value. $/sh = US dollars per diluted share. %Δ = percentage change. FULL row = the result of one event with all of its channels applied together. INT row = the cross-channel interaction (not size non-linearity) diagnostic (FULL minus the standalone channel rows at one shock size). D&A = depreciation and amortisation. EBIT = earnings before interest and tax.
 
 ## 1. Live wiring (Blocking)
 1. **Live-input test.**
@@ -29,13 +29,13 @@ Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF
    - **Jurisdiction:** one named event (for example a specific mine or country) that drives the outage, fiscal and risk-premium channels together.
    - Diagnostic rows (for example a standalone bridge view of a channel already counted in the FULL row) are allowed, but they must be labelled as diagnostic and kept out of the FULL row, so nothing is counted twice.
 7. **The label matches the code.** The years, segments and weights stated in each row label are the ones the engine actually applies. Check the first affected year column.
-8. **Interaction-row integrity.** Each event table has an INT row, labelled diagnostic, that is a live formula equal to (FULL − base) − Σ(standalone row − base).
+8. **Interaction-row integrity.** Each event table has an INT row, labelled "Cross-channel interaction (not size non-linearity)" and kind diagnostic, that is a live formula equal to (FULL − base) − Σ(standalone row − base).
    - It sums standalone rows only: never information or diagnostic rows. On a sequential ladder (each row adds one response to the previous row, as on the tariff sheet) it isolates the remaining separable channel; say so on the sheet.
    - It is outside FULL and outside the blend, and is not pasted. Recompute it from the channel rows and compare.
-9. **Both directions and reverse stress.** Each event shows FULL at the configured shock and at the mirrored shock (opposite sign) with an asymmetry line. Each event has a formula reverse-stress grid (ascending multiples) whose result cell reports the smallest tested shock that takes the FULL $/sh below the yellow threshold, or `n/a` when the threshold is blank.
+9. **Both directions and reverse stress.** Each event shows FULL at the configured shock and at the mirrored shock (opposite sign) with an asymmetry line. Each event has a formula reverse-stress grid (ascending multiples) whose result cell reports the smallest tested shock that takes the FULL $/sh below the yellow threshold, or `n/a` when the threshold is blank. The default threshold is a live formula = base $/sh × (1 − drop %), drop % a yellow input (default 25%); a blank drop % gives `n/a`. A typed threshold is an override and needs a stated reason.
    - Test it: set a threshold between two grid steps, recalculate, and confirm the result is the first step below the threshold while the previous step is at or above it.
 10. **Calibration source.** Every shock size has a yellow calibration **source** (data set or document, with date) and **basis** (for example a historical 1-year 95th percentile move).
-    - `TO FILL` is acceptable only in an ILLUSTRATIVE template. A real-issuer workbook with `TO FILL`, or with a statistic that has no cited source, is BLOCK.
+    - `TO FILL` is acceptable only in an ILLUSTRATIVE template. A real-issuer workbook with `TO FILL`, or with a statistic that has no cited source, is BLOCK. Run the checker with `--strict-calibration`; it must PASS (without the flag, TO FILL is only a WARNING).
 
 ## 3. Economic invariants (Blocking)
 11. **Pass-through invariant.** Set 100% cost recovery and zero elasticity / markdowns / mitigation. Gross-profit dollars must stay unchanged in every forecast year.

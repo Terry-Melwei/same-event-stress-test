@@ -54,7 +54,7 @@ events:
     own_capex_response: 1.20
     equity_funding_share: 0.50
     issue_price_per_share: 18.00             # judgment: issued below value per share (dilutive)
-    threshold_value_per_share: 25.00         # ILLUSTRATIVE reverse-stress threshold ($/sh); omit to disable (n/a)
+    threshold_value_per_share: 25.00         # ILLUSTRATIVE typed reverse-stress threshold ($/sh); omit to use base × (1 − threshold_drop_pct, default 25%)
 
 tariff:
   units: 30.0                 # 30 × $50 ≈ $1,500m revenue year-0

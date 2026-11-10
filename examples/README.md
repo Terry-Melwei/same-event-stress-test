@@ -2,7 +2,7 @@
 
 **Draft, not investment advice.** All three cases below use invented names and round ILLUSTRATIVE numbers. They are teaching walkthroughs of which shocks to run and which channels each shock moves. They are not valuations of any real issuer.
 
-Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = interaction row. WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together.
+Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = cross-channel interaction row (not size non-linearity). WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together.
 
 ---
 
@@ -80,7 +80,7 @@ Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present val
    - **C — Financing mix:** the PV of the extra capex is raised once: 50% equity at a yellow $18.00 issue price (below value, so dilutive) lowers net debt and adds diluted shares in the same step; 50% debt adds debt and cash equally.
    - **D / E — information:** operating-only FCFF view and an all-equity funding view, both outside FULL.
    - **FULL:** A+B+C per pre-event diluted share. The mirror (customer capex −30%) needs no financing, so the two directions are not symmetric.
-   - **Reverse stress:** an ILLUSTRATIVE $25.00 threshold is set on this sheet; the grid reports the smallest tested capex shock that takes the FULL proxy below it.
+   - **Reverse stress:** an ILLUSTRATIVE typed $25.00 threshold overrides the default (base × (1 − 25%)) on this sheet; the grid reports the smallest tested capex shock that takes the FULL proxy below it.
 
 Every shock-size calibration cell ships as `TO FILL`. No number in this case is sourced from a real company or vendor.
 

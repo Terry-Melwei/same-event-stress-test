@@ -13,14 +13,14 @@ Load this skill when you need to:
 
 - Stress a discounted cash flow (DCF) or related valuation under **one named event at a time**, showing every channel that event moves.
 - Produce a tornado, envelope, and football-field view that are **formula-linked** to those FULL rows, plus a Summary sheet that ranks the events.
-- See how non-linear an event is (interaction row, up/down mirror) and how big a shock has to be to break a value threshold (reverse stress test).
+- See how the channels of one event combine (cross-channel interaction row), whether the bad direction hurts more than the good one helps (up/down mirror and asymmetry), and how big a shock has to be to break a value threshold (reverse stress test).
 - Gate a finished workbook with [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md) and issue a written CLEAR / BLOCK verdict.
 
 Do **not** use this skill to stack multiple unrelated events in one table, to paste static scenario outputs, or to treat a CLEAR review as an endorsement of assumptions.
 
 ## Method in one paragraph
 
-A **same-event multi-channel stress test** takes a single shock (for example rates +100 basis points, or commodity price −20%) and builds **one table for that shock**. Rows A, B, C… each isolate one transmission channel. The **FULL** row applies every channel of that same event together. Never put two different events in the same table. Measure each FULL percentage change (%Δ) against **that method’s own base**, apply the %Δ to the blended midpoint, and label the result a **blended-mid sensitivity proxy**. Wire tornado, envelope, and football-field ranges to the FULL rows with live Excel formulas. Under every table, show what the channel rows cannot: an **interaction** row (FULL minus the sum of the standalone rows), the same event **mirrored** (opposite sign) so the asymmetry is visible, a **reverse stress** grid, and the **calibration source** of the shock size.
+A **same-event multi-channel stress test** takes a single shock (for example rates +100 basis points, or commodity price −20%) and builds **one table for that shock**. Rows A, B, C… each isolate one transmission channel. The **FULL** row applies every channel of that same event together. Never put two different events in the same table. Measure each FULL percentage change (%Δ) against **that method’s own base**, apply the %Δ to the blended midpoint, and label the result a **blended-mid sensitivity proxy**. Wire tornado, envelope, and football-field ranges to the FULL rows with live Excel formulas. Under every table, show what the channel rows cannot: a **cross-channel interaction (not size non-linearity)** row (FULL minus the sum of the standalone rows), the same event **mirrored** (opposite sign) so the asymmetry is visible, a **reverse stress** grid, and the **calibration source** of the shock size.
 
 ## Choosing the shock size
 
@@ -41,7 +41,7 @@ Each event sheet already shows the shock and its mirror (the same size, opposite
 
 ## Reverse stress test
 
-The reverse-stress grid (wiring rule 11) answers: how big a shock pushes value per share below the threshold in the yellow cell? If nobody has a specific level in mind, use **25% below the base value per share** as the default and say so. Then compare the break-point shock with the calibration source: a break point inside the historically plausible range is a finding to lead with; one far beyond the extreme range is reassurance. For a debt covenant, read net debt ÷ earnings before interest, tax, depreciation and amortisation (EBITDA) at the break-point shock by hand until a covenant row exists.
+The reverse-stress grid (wiring rule 11) answers: how big a shock pushes value per share below the threshold in the yellow cell? If nobody has a specific level in mind, use **25% below the base value per share** as the default and say so; the generator already wires this default as a live formula (threshold B66 = base × (1 − drop %), with the drop % in yellow cell D66). Then compare the break-point shock with the calibration source: a break point inside the historically plausible range is a finding to lead with; one far beyond the extreme range is reassurance. For a debt covenant, read net debt ÷ earnings before interest, tax, depreciation and amortisation (EBITDA) at the break-point shock by hand until a covenant row exists.
 
 ## Per-shock channel checklists
 
@@ -62,7 +62,7 @@ Shock example: ±100 basis points (bp). Stress the **selected** weighted average
 
 ### Commodity price
 
-Shock example: ±20% on the long-term commodity price. Model **revenue and operating expenses (opex) separately**. Price moves revenue only; costs move only via the documented cost elasticity (yellow judgment input).
+Shock example: ±20% on the long-term commodity price. Model **revenue and operating expenses (opex) separately**. In this generator opex % of revenue **includes** depreciation and amortisation (D&A): earnings before interest and tax (EBIT) = revenue − opex − royalty, and free cash flow to the firm (FCFF) adds D&A back. Price moves revenue only; costs move only via the documented cost elasticity (yellow judgment input).
 
 | Row | Kind | Channel | What moves |
 |-----|------|---------|------------|
@@ -138,10 +138,10 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 6. **Colour conventions.** Blue font = inputs. Black font = formulas. Yellow fill = judgment (and disclose large judgments on the cover / football outside the blend).
 7. **Diluted shares.** Equity value per share uses diluted share count; share-count changes pair with cash once.
 8. **Blend lock.** The blended midpoint averages valuation-method rows only. Stress bands, the interaction row, mirror and reverse-stress results, the Summary sheet and reference rows stay outside the blend.
-9. **Interaction row.** Row 12 on each event sheet (labelled INT, kind diagnostic) = (FULL − base) − Σ(standalone row − base), in $m and $/sh. Never sum information or diagnostic rows into it, never feed it into FULL or the blend, and never paste it. Where the channel rows are a sequential ladder (the tariff sheet), the increments already sum to the last step, so INT isolates the cross-effect of the remaining separable channel (sourcing mitigation). INT = 0 means the channels add linearly; in the template the commodity and rates channels are additive by construction, so their INT is 0 and that is correct.
+9. **Interaction row.** Row 12 on each event sheet, labelled **Cross-channel interaction (not size non-linearity)** (INT, kind diagnostic), = (FULL − base) − Σ(standalone row − base), in $m and $/sh. Never sum information or diagnostic rows into it, never feed it into FULL or the blend, and never paste it. Where the channel rows are a sequential ladder (the tariff sheet), the increments already sum to the last step, so INT isolates the cross-effect of the remaining separable channel (sourcing mitigation). INT = 0 means the channels add up at that one shock size; it does **not** mean the value response is linear in shock size (see *Reading the result* above and the mirror / asymmetry rows 61–63; a multi-size shock ladder is coming). In the template the commodity and rates channels are additive by construction, so their INT is 0 and that is correct.
 10. **Both directions.** Show FULL at the configured shock and at the mirrored shock (same size, opposite sign) with an asymmetry line = (configured − base) + (mirrored − base).
-11. **Reverse stress test.** An 8-step formula grid of ascending shock multiples (blue inputs) in the configured direction, and a result cell that reports the smallest tested shock whose FULL proxy $/sh falls below a yellow threshold. Blank threshold → `n/a`. No goal seek, no macros, no pasted answers.
-12. **Calibration rule.** Every shock size has a yellow **source** cell (data set or document, with date) and a yellow **basis** cell (for example a historical 1-year 95th percentile move). Ship them as `TO FILL: source` / `TO FILL: basis`; never invent a statistic. A real-issuer workbook cannot be CLEAR while either says TO FILL.
+11. **Reverse stress test.** An 8-step formula grid of ascending shock multiples (blue inputs) in the configured direction, and a result cell that reports the smallest tested shock whose FULL proxy $/sh falls below a yellow threshold. The threshold (B66) defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (D66, default 25%); typing a $/sh level over B66 (or `threshold_value_per_share` in the config) overrides it. Blank drop % or blank threshold → `n/a`. No goal seek, no macros, no pasted answers.
+12. **Calibration rule.** Every shock size has a yellow **source** cell (data set or document, with date) and a yellow **basis** cell (for example a historical 1-year 95th percentile move). Ship them as `TO FILL: source` / `TO FILL: basis`; never invent a statistic. A real-issuer workbook cannot be CLEAR while either says TO FILL. The checker prints a WARNING listing every event still TO FILL; run it with `--strict-calibration` for a real-issuer CLEAR so TO FILL becomes FAIL. An empty cell always FAILs.
 13. **Enter shocks in their adverse direction.** The grid and the default checker tests treat the configured sign as the adverse case; flip the input to test the other side.
 14. **Summary sheet.** Right after the Cover, rank every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas (no SORT, no macros), showing down-case / up-case $/sh, %Δ, interaction, asymmetry and the reverse-stress result.
 
@@ -154,7 +154,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 | Yellow fill + blue font | Judgment / discretionary assumption |
 | ILLUSTRATIVE | Fake numbers for teaching; not a real issuer |
 | blended-mid sensitivity proxy | FULL %Δ applied to blended midpoint |
-| INT (diagnostic) | Interaction row: FULL minus the standalone channel rows; outside FULL and the blend |
+| INT (diagnostic) | Cross-channel interaction (not size non-linearity): FULL minus the standalone channel rows at one shock size; outside FULL and the blend |
 | TO FILL | Calibration source / basis not yet cited; blocks a real-issuer CLEAR |
 | Draft, not investment advice | Required cover label |
 
@@ -164,7 +164,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 2. **Add one event table per shock**, with channel rows labelled standalone / cumulative / information / diagnostic, and a FULL row that excludes information/diagnostic rows. Add the interaction row, the mirror, the reverse-stress grid and the calibration cells under it. Fill the calibration source/basis or leave them `TO FILL`.
 3. **Wire** tornado, envelope, football field (tables + charts) and the Summary sheet to the FULL rows; label blended-mid sensitivity proxies.
 4. **Recalculate** (LibreOffice or Excel). Regeneration leaves formula caches empty until recalc.
-5. **Run** `python scripts/check_workbook.py <out.xlsx> --config <case.yaml>` (live tests, pasted-output scan, pass-through invariant, independent FULL / mirror / grid recompute, interaction, reverse-stress and Summary checks), then every Blocking item in [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md).
+5. **Run** `python scripts/check_workbook.py <out.xlsx> --config <case.yaml>` (live tests, pasted-output scan, pass-through invariant, independent FULL / mirror / grid recompute, interaction, reverse-stress and Summary checks; add `--strict-calibration` for a real issuer), then every Blocking item in [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md).
 6. **Report both directions** and the downside / upside ratio, name the channel behind any asymmetry, and state the shock's historical anchor and severity label.
 7. **Write a pass/fail verdict** using the checklist’s verdict template (`CLEAR` or `BLOCK` with numbered cell-cited fixes). CLEAR means the workbook is built correctly; it does not endorse the assumptions.
 
@@ -182,6 +182,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 | Capex funding counted in FCFF **and** again as new debt in the bridge | Debt-funded part adds debt and cash equally; only the equity part moves net debt, paired with new diluted shares |
 | A "shock size" with no source | Yellow calibration source + basis cells; `TO FILL` until sourced |
 | Interaction row typed in, or summing information rows | Live formula over standalone rows only; checker recomputes it |
+| D&A subtracted twice (once inside opex, again below EBIT) | Opex % includes D&A; FCFF = NOPAT + D&A − capex − ΔNWC adds it back once |
 | One-directional shock reported as "the" sensitivity | Run adverse and favourable sizes; report both and the downside / upside ratio |
 | Shock size picked without justification | Anchor to a cited historical move and label it plausible, severe or extreme |
 

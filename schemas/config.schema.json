@@ -73,7 +73,8 @@
         "opex_pct_of_revenue": {
           "type": "number",
           "minimum": 0,
-          "maximum": 1
+          "maximum": 1,
+          "description": "Operating expenses (excluding royalty) as % of revenue. INCLUDES depreciation and amortisation (D&A): EBIT = revenue − opex − royalty, and free cash flow to the firm (FCFF) adds D&A back."
         },
         "tax_rate": {
           "type": "number",
@@ -481,7 +482,7 @@
             "number",
             "null"
           ],
-          "description": "Reverse stress threshold in $/sh (blended-mid proxy); null/absent = disabled (n/a)."
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base × (1 − threshold_drop_pct)). Null/absent = use the default formula."
         },
         "calibration_source": {
           "type": "string",
@@ -500,6 +501,15 @@
             "exclusiveMinimum": 0
           },
           "description": "8 ascending multiples of the configured shock for the reverse stress grid."
+        },
+        "threshold_drop_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank → reverse-stress result n/a."
         }
       }
     },
@@ -521,7 +531,7 @@
             "number",
             "null"
           ],
-          "description": "Reverse stress threshold in $/sh (blended-mid proxy); null/absent = disabled (n/a)."
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base × (1 − threshold_drop_pct)). Null/absent = use the default formula."
         },
         "calibration_source": {
           "type": "string",
@@ -559,6 +569,15 @@
         "issue_price_per_share": {
           "type": "number",
           "exclusiveMinimum": 0
+        },
+        "threshold_drop_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank → reverse-stress result n/a."
         }
       },
       "if": {

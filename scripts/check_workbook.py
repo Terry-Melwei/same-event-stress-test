@@ -63,6 +63,9 @@ STANDALONE_ROWS = {
 ROW_INT, ROW_CONF, ROW_MIRROR, ROW_ASYM = 12, 61, 62, 63
 ROW_THRESHOLD, ROW_RESULT, ROW_GRID0, N_GRID = 66, 67, 69, 8
 ROW_CALIB_SOURCE, ROW_CALIB_BASIS = 56, 57
+COL_DROP = "D"  # yellow drop-% input next to the threshold (row 66)
+INTERACTION_LABEL = "Cross-channel interaction (not size non-linearity)"
+THRESHOLD_DEFAULT_FX = f'=IF({COL_DROP}{ROW_THRESHOLD}="","",DCF!$B$33*(1-{COL_DROP}{ROW_THRESHOLD}))'
 
 # Required dependency chain cells (enumerated from workbook structure).
 # second_event_sheet is resolved from the workbook (Event_Commodity or Event_Tariff).
@@ -1162,15 +1165,17 @@ def expected_reverse_result(grid: list[tuple[float, float]], threshold: Any, bas
     return "none in tested range"
 
 
-def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
+def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str], list[tuple[str, str, str]]]:
     """Interaction rows, up/down mirror, reverse-stress grid + result, calibration cells, Summary.
 
     Values are checked against the independent reference (reference_dcf.py), not the sheet formulas.
-    Returns (failures, details, manual_review_items).
+    Returns (failures, details, manual_review_items, calibration_to_fill) where calibration_to_fill
+    lists (sheet, 'source'|'basis', cell value) for every calibration cell still marked TO FILL.
     """
     failures: list[str] = []
     details: list[str] = []
     manual: list[str] = []
+    to_fill: list[tuple[str, str, str]] = []
     m = load_inputs_from_workbook(path)
     base = base_equity_perp(m)
     blend = blended_mid(m)
@@ -1188,6 +1193,9 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
         # --- interaction row ---
         kind = str(ws[f"B{ROW_INT}"].value or "").lower()
         int_fx = wf[f"D{ROW_INT}"].value
+        label = str(ws[f"C{ROW_INT}"].value or "")
+        if not label.startswith(INTERACTION_LABEL):
+            failures.append(f"Interaction: {sheet}!C{ROW_INT} label must start {INTERACTION_LABEL!r}, got {label!r}")
         if kind != "diagnostic":
             failures.append(f"Interaction: {sheet}!B{ROW_INT} kind must be 'diagnostic', got {kind!r}")
         if not (isinstance(int_fx, str) and int_fx.startswith("=")):
@@ -1254,6 +1262,21 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
         if grid_ok:
             details.append(f"Reverse grid OK: {sheet} {N_GRID} steps match reference")
         thr = ws[f"B{ROW_THRESHOLD}"].value
+        thr_fx = wf[f"B{ROW_THRESHOLD}"].value
+        if isinstance(thr_fx, str) and thr_fx.startswith("="):
+            # Default threshold: live formula = base blended-mid $/sh × (1 − drop %), blank drop → blank → n/a
+            if thr_fx.replace(" ", "") != THRESHOLD_DEFAULT_FX:
+                failures.append(f"Reverse stress: {sheet}!B{ROW_THRESHOLD} formula {thr_fx!r} is not the default "
+                                f"{THRESHOLD_DEFAULT_FX!r} (type a number to override instead)")
+            drop = ws[f"{COL_DROP}{ROW_THRESHOLD}"].value
+            if drop is None or drop == "":
+                if thr not in (None, ""):
+                    failures.append(f"Reverse stress: {sheet} blank drop % but threshold = {thr!r}")
+            elif not _close(thr, base_sh * (1.0 - float(drop)), tol_abs=1e-9):
+                failures.append(f"Reverse stress: {sheet}!B{ROW_THRESHOLD}={thr!r} != base × (1 − {drop}) "
+                                f"= {base_sh * (1.0 - float(drop))}")
+            else:
+                details.append(f"Reverse stress threshold OK: {sheet} default = base × (1 − {float(drop):.0%}) = {float(thr):.4f}")
         exp_res = expected_reverse_result(grid, thr, base_sh)
         got = ws[f"B{ROW_RESULT}"].value
         if isinstance(exp_res, float):
@@ -1271,7 +1294,7 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
             if v is None or str(v).strip() == "":
                 failures.append(f"Calibration: {sheet}!B{r} ({what}) is empty — write TO FILL or cite it")
             elif str(v).upper().startswith("TO FILL"):
-                manual.append(f"{sheet}!B{r} calibration {what} is '{v}' — must be sourced before a real-issuer CLEAR")
+                to_fill.append((sheet, what, str(v)))
 
         summary_src.append({
             "sheet": sheet,
@@ -1304,7 +1327,22 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
             details.append(f"Summary ranking OK ({' > '.join(e['sheet'] for _i, e in ranked)})")
     wb.close()
     wbf.close()
-    return failures, details, manual
+    return failures, details, manual, to_fill
+
+
+def calibration_messages(to_fill: list[tuple[str, str, str]], strict: bool) -> tuple[list[str], list[str]]:
+    """TO FILL calibration cells: WARNING by default, FAIL under --strict-calibration. Returns (warnings, failures)."""
+    if not to_fill:
+        return [], []
+    by_sheet: dict[str, list[str]] = {}
+    for sheet, what, _v in to_fill:
+        by_sheet.setdefault(sheet, []).append(what)
+    listing = "; ".join(f"{sheet} ({' + '.join(whats)})" for sheet, whats in by_sheet.items())
+    msg = (f"Calibration still TO FILL on {len(by_sheet)} event(s): {listing}. "
+           "Cite a source and basis (rows 56–57) before a real-issuer CLEAR.")
+    if strict:
+        return [], [msg + " [--strict-calibration]"]
+    return [msg + " Use --strict-calibration to make this a FAIL."], []
 
 
 def run_regression_mutations(good: Path, config: Path | None) -> int:
@@ -1537,8 +1575,10 @@ def main_check(
     config: Path | None,
     skip_recalc: bool = False,
     run_regression: bool = False,
+    strict_calibration: bool = False,
 ) -> int:
     manual: list[str] = []
+    warnings: list[str] = []
     failures: list[str] = []
     details: list[str] = []
 
@@ -1628,10 +1668,13 @@ def main_check(
         details.extend(recon_detail)
 
         # Interaction rows, mirror, reverse-stress grid/result, calibration, Summary ranking
-        ex_fail, ex_detail, ex_manual = verify_event_extras(base)
+        ex_fail, ex_detail, ex_manual, to_fill = verify_event_extras(base)
         failures.extend(ex_fail)
         details.extend(ex_detail)
         manual.extend(ex_manual)
+        cal_warn, cal_fail = calibration_messages(to_fill, strict_calibration)
+        warnings.extend(cal_warn)
+        failures.extend(cal_fail)
 
         # Tariff-specific: if Event_Tariff present, FULL equity < base at configured <100% PT
         if second == "Event_Tariff":
@@ -1698,7 +1741,7 @@ def main_check(
     if str(kind_b).lower() != "information" or str(kind_e).lower() != "information":
         failures.append(f"Rates B/E should be information rows, got B={kind_b}, E={kind_e}")
 
-    _print_report(details, manual, failures)
+    _print_report(details, manual, failures, warnings)
     rc = 1 if failures else 0
 
     if run_regression and rc == 0:
@@ -1707,10 +1750,14 @@ def main_check(
     return rc
 
 
-def _print_report(details, manual, failures) -> None:
+def _print_report(details, manual, failures, warnings=()) -> None:
     print("\n--- Details ---")
     for line in details:
         print(line)
+    if warnings:
+        print("\n--- Warnings ---")
+        for w in warnings:
+            print(f"WARNING: {w}")
     print("\n--- Manual review list ---")
     if not manual:
         print("  (none automated; still run REVIEW_CHECKLIST.md for CLEAR/BLOCK)")
@@ -1742,8 +1789,14 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="After PASS, mutate workbook two ways + empty-cache and require those checks to FAIL",
     )
+    parser.add_argument(
+        "--strict-calibration",
+        action="store_true",
+        help="Treat calibration source/basis cells still marked TO FILL as FAIL (use for a real-issuer CLEAR)",
+    )
     args = parser.parse_args(argv)
-    return main_check(args.workbook, args.config, skip_recalc=args.skip_recalc, run_regression=args.regression)
+    return main_check(args.workbook, args.config, skip_recalc=args.skip_recalc, run_regression=args.regression,
+                      strict_calibration=args.strict_calibration)
 
 
 if __name__ == "__main__":

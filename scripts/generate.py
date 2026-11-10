@@ -173,7 +173,9 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     section(4, "Operating")
     put(5, "Revenue year-0 ($m)", inp["revenue_y0"], "#,##0.0", "ILLUSTRATIVE base revenue")
     put(6, "Revenue growth Y1–Y5", inp["revenue_growth"], "0.0%", "Constant growth for template simplicity")
-    put(7, "Opex % of revenue (ex-royalty)", inp["opex_pct_of_revenue"], "0.0%", "Operating expenses; held fixed when price moves unless cost elasticity applies")
+    put(7, "Opex % of revenue (ex-royalty; INCLUDES depreciation and amortisation, D&A)", inp["opex_pct_of_revenue"], "0.0%",
+        "Operating expenses including D&A; free cash flow to the firm (FCFF) adds D&A back. "
+        "Held fixed when price moves unless cost elasticity applies")
     put(8, "Tax rate", inp["tax_rate"], "0.0%", "")
     put(9, "D&A % of revenue", inp["da_pct_of_revenue"], "0.0%", "D&A = depreciation and amortisation")
     put(10, "Capex % of revenue", inp["capex_pct_of_revenue"], "0.0%", "Capex = capital expenditure")
@@ -1110,7 +1112,7 @@ EVENT_SPECS: dict[str, dict[str, Any]] = {
         # Rows B-D are a sequential ladder (each adds one response to the unit-cost shock), so their
         # increments sum to row D exactly; the only separable add-on left is sourcing mitigation (B47).
         "interaction_formula": "=D11-D9-(B47-D6)",
-        "interaction_label": "Interaction = FULL − (ladder A→D) − (mitigation-only − A)",
+        "interaction_label": "FULL − (ladder A→D) − (mitigation-only − A)",
         "short": "Tariff",
     },
     "Event_Capex": {
@@ -1123,6 +1125,8 @@ EVENT_SPECS: dict[str, dict[str, Any]] = {
 }
 
 DEFAULT_REVERSE_MULTIPLES = [0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0]
+DEFAULT_THRESHOLD_DROP = 0.25  # default reverse-stress threshold = base $/sh × (1 − 25%)
+INTERACTION_LABEL = "Cross-channel interaction (not size non-linearity)"
 
 # Fixed layout of the blocks added to every event sheet (stable for check_workbook / tests).
 ROW_INTERACTION = 12
@@ -1259,19 +1263,19 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     unit = spec["unit"]
     writer = HELPER_WRITERS[sheet]
 
-    # --- Interaction / nonlinearity diagnostic (row 12; outside FULL and outside the blend) ---
+    # --- Cross-channel interaction diagnostic (row 12; outside FULL and outside the blend) ---
     r = ROW_INTERACTION
     if "interaction_formula" in spec:
         fx = spec["interaction_formula"]
-        label = spec["interaction_label"]
+        how = spec["interaction_label"]
     else:
         rows = spec["standalone_rows"]
         fx = "=(D11-DCF!$B$28)-(" + "+".join(f"(D{x}-DCF!$B$28)" for x in rows) + ")"
-        label = "Interaction = FULL − sum of standalone rows (" + ", ".join(ws[f"A{x}"].value for x in rows) + ")"
+        how = "FULL − sum of standalone rows (" + ", ".join(ws[f"A{x}"].value for x in rows) + ")"
     ws[f"A{r}"] = "INT"
     ws[f"B{r}"] = "diagnostic"
     ws[f"B{r}"].fill = INFO_FILL
-    ws[f"C{r}"] = label
+    ws[f"C{r}"] = INTERACTION_LABEL
     ws[f"D{r}"] = fx
     ws[f"E{r}"] = f"=D{r}/DCF!$B$28"
     ws[f"F{r}"] = f"=DCF!$B$30*E{r}"
@@ -1282,8 +1286,9 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     for c in range(1, 8):
         ws.cell(r, c).border = THIN
     ws[f"H{r}"] = (
-        "DIAGNOSTIC (a change, not a level): nonlinearity / cross-effect of the channels. "
-        "Outside FULL, outside the blend; 0 means the channels add up linearly."
+        f"DIAGNOSTIC (a change, not a level) = {how}. How the channels combine at this one shock size; "
+        "outside FULL and the blend. 0 does NOT mean value is linear in shock size: see the mirror and "
+        f"asymmetry rows {ROW_MIRROR_CONF}–{ROW_MIRROR_ASYM} (a multi-size shock ladder is planned)."
     )
     ws[f"H{r}"].font = MUTED
 
@@ -1335,7 +1340,7 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     for c, fmt in (("D", "#,##0.0"), ("E", "0.0%"), ("F", "#,##0.0"), ("G", "0.00")):
         ws[f"{c}{ra}"].number_format = fmt
         style_formula(ws[f"{c}{ra}"])
-    ws[f"H{ra}"] = "0 = symmetric (linear). Negative = the bad direction hurts more than the good direction helps."
+    ws[f"H{ra}"] = "0 = symmetric at this size. Negative = the bad direction hurts more than the good direction helps."
     ws[f"H{ra}"].font = MUTED
 
     # --- Reverse stress test (formula grid; no goal seek, no macros) ---
@@ -1343,8 +1348,21 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     ws[f"A{ROW_REV_TITLE}"].font = HEADER
     ws[f"A{ROW_REV_TITLE}"].fill = LIGHT
     th = ROW_REV_THRESHOLD
-    ws[f"A{th}"] = "Threshold value per share ($/sh, blended-mid proxy). Blank = disabled"
-    ws[f"B{th}"] = ev_cfg.get("threshold_value_per_share")
+    ws[f"A{th}"] = "Threshold value per share ($/sh, blended-mid proxy). Default = base × (1 − drop %); blank = n/a"
+    drop = ev_cfg.get("threshold_drop_pct", DEFAULT_THRESHOLD_DROP)
+    ws[f"C{th}"] = "Drop below base value per share →"
+    ws[f"C{th}"].font = MUTED
+    ws[f"D{th}"] = drop  # None (config null) leaves it blank → n/a
+    ws[f"D{th}"].number_format = "0.0%"
+    style_judgment(ws[f"D{th}"])
+    override = ev_cfg.get("threshold_value_per_share")
+    if override is None:
+        ws[f"B{th}"] = f'=IF(D{th}="","",DCF!$B$33*(1-D{th}))'
+        ws[f"E{th}"] = "Yellow judgment cells: change the drop % (D), or type a $/sh level over B. Blank drop % → n/a."
+    else:
+        ws[f"B{th}"] = float(override)
+        ws[f"E{th}"] = "B is a typed threshold (config threshold_value_per_share); the drop % in D is not used."
+    ws[f"E{th}"].font = MUTED
     ws[f"B{th}"].number_format = "0.00"
     style_judgment(ws[f"B{th}"])
     first, last = ROW_REV_FIRST, ROW_REV_FIRST + N_REV_STEPS - 1
@@ -1783,8 +1801,8 @@ def _build_summary(wb: Workbook, event_list) -> None:
     h0 = 13  # helper header row
     first, last = h0 + 1, h0 + n
     hdr = ["Rank", "Event", "Sheet", "Configured shock", "FULL $/sh down-case", "FULL $/sh up-case",
-           "%Δ at configured shock", "Δ $/sh at configured shock", "Interaction ($/sh)", "Asymmetry ($/sh)",
-           "Reverse-stress result (shock)"]
+           "%Δ at configured shock", "Δ $/sh at configured shock", INTERACTION_LABEL + " ($/sh)",
+           "Asymmetry ($/sh)", "Reverse-stress result (shock)"]
     for c, h in enumerate(hdr, 1):
         sm.cell(4, c, h).font = HEADER
         sm.cell(4, c).fill = LIGHT
@@ -1796,7 +1814,7 @@ def _build_summary(wb: Workbook, event_list) -> None:
     sm[f"A{h0 - 1}"] = "Source block (unranked; formula links to each event sheet)"
     sm[f"A{h0 - 1}"].font = HEADER
     src_hdr = ["Event", "Sheet", "Configured shock", "FULL $/sh @ configured", "FULL $/sh @ mirrored",
-               "%Δ @ configured", "Δ $/sh @ configured", "Interaction ($/sh)", "Asymmetry ($/sh)",
+               "%Δ @ configured", "Δ $/sh @ configured", INTERACTION_LABEL + " ($/sh)", "Asymmetry ($/sh)",
                "Reverse-stress result", "Rank key (|Δ $/sh|, tie-break by row)"]
     for c, h in enumerate(src_hdr, 1):
         sm.cell(h0, c, h).font = HEADER
@@ -1858,7 +1876,7 @@ def _build_summary(wb: Workbook, event_list) -> None:
     sm["A10"] = (
         "Down-case / up-case = lower / higher of the configured and mirrored FULL proxies. Reverse-stress result = "
         "smallest tested shock that takes the FULL proxy $/sh below the yellow threshold on that event sheet "
-        "(n/a when the threshold is blank). Ranking uses the LARGE and INDEX/MATCH spreadsheet functions (Excel and LibreOffice)."
+        "(default threshold = base × (1 − 25%); n/a when the drop % or threshold is blank). Ranking uses the LARGE and INDEX/MATCH spreadsheet functions (Excel and LibreOffice)."
     )
     sm["A10"].font = MUTED
     sm["A10"].alignment = Alignment(wrap_text=True)
@@ -1977,7 +1995,7 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
     sheets = [e[0] for e in event_list]
     notes = [
         "",
-        "DCF = discounted cash flow of FCFF = free cash flow to the firm. FCFF = NOPAT (net operating profit after tax) + D&A (depreciation and amortisation) − capex (capital expenditure) − ΔNWC (change in net working capital), with NOPAT from EBIT = earnings before interest and tax. Revenue and opex (operating expenses) are separate lines.",
+        "DCF = discounted cash flow of FCFF = free cash flow to the firm. FCFF = NOPAT (net operating profit after tax) + D&A (depreciation and amortisation) − capex (capital expenditure) − ΔNWC (change in net working capital), with NOPAT from EBIT = earnings before interest and tax. Revenue and opex (operating expenses) are separate lines. Opex % of revenue INCLUDES D&A; FCFF adds D&A back, so D&A is never subtracted twice.",
         "WACC = weighted average cost of capital. Cost of equity from CAPM = capital asset pricing model: risk-free + beta × equity risk premium. Selected WACC = override if yellow cell filled, else raw CAPM.",
         "Net-debt bridge: equity = EV (enterprise value) − (gross debt − cash) ± mark-to-market (MTM). Financing is not inside FCFF. Per-share values use diluted shares; $/sh = US dollars per diluted share.",
         "Event_Rates: A standalone WACC (stressed WACC = selected WACC + Δ, in bp = basis points); B information floating interest; C standalone fixed-debt MTM; D information EPS (earnings per share); E information buyback; FULL cumulative = A+C only.",
@@ -1990,9 +2008,9 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         notes.append("Event_Capex: one customer capex shock. A own revenue via yellow elasticity; B own capex via yellow response; C financing mix — the funding need (PV of incremental own capex, floored at 0) is raised once at t0: the equity part lowers net debt and adds diluted shares at the yellow issue price in the same step, the debt part adds debt and cash equally. FULL = A+B+C, measured per pre-event share; D/E information rows are outside FULL.")
     notes += [
         "%Δ (percentage change): each FULL versus its own perpetual-growth method base, then × blended mid → blended-mid sensitivity proxy.",
-        "Interaction row (row 12 on each event sheet, labelled INT, diagnostic): FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows the nonlinearity / cross-effects; it is outside FULL and outside the blend. On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
-        "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means linear.",
-        "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold; blank threshold → n/a. No goal seek, no macros.",
+        "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that (a multi-size shock ladder is planned). On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
+        "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
+        "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. No goal seek, no macros.",
         "Shock calibration (rows 54–57): yellow source and basis cells for each shock size (for example a historical 1-year 95th percentile move). Shipped as TO FILL; never invent a statistic.",
         "Summary sheet: ranks every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas; shows down-case / up-case, %Δ, interaction, asymmetry and reverse-stress result. Outside the blend.",
         "PassThrough: units × price × unit cost with fixed cost separate; invariant at 100% pass-through and zero elasticity/markdowns/mitigation.",
