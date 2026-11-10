@@ -1289,7 +1289,7 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     ws[f"H{r}"] = (
         f"DIAGNOSTIC (a change, not a level) = {how}. How the channels combine at this one shock size; "
         "outside FULL and the blend. 0 does NOT mean value is linear in shock size: see the mirror and "
-        f"asymmetry rows {ROW_MIRROR_CONF}–{ROW_MIRROR_ASYM} (a multi-size shock ladder is planned)."
+        f"asymmetry rows {ROW_MIRROR_CONF}–{ROW_MIRROR_ASYM} and the Ladder sheet."
     )
     ws[f"H{r}"].font = MUTED
 
@@ -1369,9 +1369,16 @@ def _add_event_extras(ws, sheet: str, ev_cfg: dict[str, Any]) -> None:
     first, last = ROW_REV_FIRST, ROW_REV_FIRST + N_REV_STEPS - 1
     res = ROW_REV_RESULT
     ws[f"A{res}"] = f"Result: smallest tested shock ({unit}) with FULL proxy $/sh below threshold"
+    idx = f'INDEX(C{first}:C{last},MATCH(MIN(E{first}:E{last}),E{first}:E{last},0))'
+    if unit == "bp":
+        # IF sign + TEXT, not "+0", because LibreOffice TEXT with a leading + renders negatives as "-+200"
+        shock_txt = f'IF({idx}>=0,"+","")&TEXT({idx},"0")&" basis points"'
+    else:
+        shock_txt = f'IF({idx}>=0,"+","")&TEXT({idx},"0.0%")'
+    miss = f'"Not reached: worst is "&TEXT(MIN(E{first}:E{last}),"0.0%")&" at "&{shock_txt}'
     ws[f"B{res}"] = (
         f'=IF(B{th}="","n/a",IF(DCF!$B$33<B{th},"base already below threshold",'
-        f'IFERROR(INDEX(C{first}:C{last},MATCH(1,H{first}:H{last},0)),"none in tested range")))'
+        f'IFERROR(INDEX(C{first}:C{last},MATCH(1,H{first}:H{last},0)),{miss})))'
     )
     ws[f"B{res}"].number_format = spec["fmt"]
     ws[f"C{res}"] = f'=IF(ISNUMBER(B{res}),INDEX(B{first}:B{last},MATCH(1,H{first}:H{last},0)),"")'
@@ -2009,9 +2016,9 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         notes.append("Event_Capex: one customer capex shock. A own revenue via yellow elasticity; B own capex via yellow response; C financing mix — the funding need (PV of incremental own capex, floored at 0) is raised once at t0: the equity part lowers net debt and adds diluted shares at the yellow issue price in the same step, the debt part adds debt and cash equally. FULL = A+B+C, measured per pre-event share; D/E information rows are outside FULL.")
     notes += [
         "%Δ (percentage change): each FULL versus its own perpetual-growth method base, then × blended mid → blended-mid sensitivity proxy.",
-        "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that (a multi-size shock ladder is planned). On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
+        "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that and the Ladder sheet. On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
         "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
-        "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. No goal seek, no macros.",
+        "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. If no tested shock breaks the threshold, the cell reads 'Not reached: worst is -X% at …' with the worst fall and shock on the grid. No goal seek, no macros.",
         "Shock calibration (rows 54–57): yellow source and basis cells for each shock size (for example a historical 1-year 95th percentile move). Shipped as TO FILL; never invent a statistic.",
         "Ladder sheet: each event's FULL re-run at yellow multiples of its configured shock (default −1.5× to +1.5×), both directions, via helper rows 90–97 on each event sheet. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a check cell. The reverse stress test there interpolates the shock that cuts FULL equity by each yellow % target; scripts/reverse_stress.py solves it exactly.",
         "Summary sheet: ranks every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas; shows down-case / up-case, %Δ, interaction, asymmetry and reverse-stress result. Outside the blend.",
@@ -2152,13 +2159,21 @@ def _build_ladder(wb: Workbook, event_list) -> None:
                 )
                 style_formula(ld[f"{hc}{a}"])
             rng = f"{hc}{rows[0]}:{hc}{rows[-2]}"
-            out = ld.cell(rr, 2 + k, f'=IF(COUNT({rng})=0,"Outside ladder range",AVERAGE({rng}))')
+            first_r, last_r = rows[0], rows[-1]
+            idx = f'INDEX(C{first_r}:C{last_r},MATCH(MIN(F{first_r}:F{last_r}),F{first_r}:F{last_r},0))'
+            if spec["unit"] == "bp":
+                shock_txt = f'IF({idx}>=0,"+","")&TEXT({idx},"0")&" basis points"'
+            else:
+                shock_txt = f'IF({idx}>=0,"+","")&TEXT({idx},"0.0%")'
+            miss = f'"Not reached: worst is "&TEXT(MIN(F{first_r}:F{last_r}),"0.0%")&" at "&{shock_txt}'
+            out = ld.cell(rr, 2 + k, f'=IF(COUNT({rng})=0,{miss},AVERAGE({rng}))')
             out.number_format = spec["fmt"]
             out.border = THIN
             style_formula(out)
     ld.cell(rt + 2 + len(LADDER_TARGETS), 1,
-            "'Outside ladder range' = even the largest rung does not reach that fall. scripts/reverse_stress.py solves the "
-            "same question exactly (no interpolation) from the Inputs sheet.").font = MUTED
+            "'Not reached: worst is -X% at …' means even the largest tested rung does not take value "
+            "down by that target; the cell still shows the worst fall on the ladder. scripts/reverse_stress.py "
+            "solves the same question exactly (no interpolation) from the Inputs sheet.").font = MUTED
 
     # ---- Charts: FULL equity vs shock size, one per event ----
     for k, (sheet, label, spec, rows) in enumerate(blocks):

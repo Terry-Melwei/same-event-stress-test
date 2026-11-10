@@ -27,7 +27,8 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from reference_dcf import (  # noqa: E402
+from reference_dcf import (
+    format_not_reached,  # noqa: E402
     ladder_layout,
     reconcile_ladder,
     blended_mid,
@@ -1154,7 +1155,7 @@ def _close(a: Any, b: Any, tol_rel: float = 1e-4, tol_abs: float = 0.01) -> bool
     return abs(a - b) <= max(tol_abs, abs(b) * tol_rel)
 
 
-def expected_reverse_result(grid: list[tuple[float, float]], threshold: Any, base_sh: float) -> Any:
+def expected_reverse_result(grid: list[tuple[float, float]], threshold: Any, base_sh: float, unit: str = "bp") -> Any:
     """grid = [(shock size, FULL proxy $/sh)] in ascending-multiple order."""
     if threshold is None or threshold == "":
         return "n/a"
@@ -1164,7 +1165,8 @@ def expected_reverse_result(grid: list[tuple[float, float]], threshold: Any, bas
     for shock, sh in grid:
         if sh < thr:
             return shock
-    return "none in tested range"
+    shock, sh = min(grid, key=lambda p: p[1])
+    return format_not_reached(sh / base_sh - 1.0, shock, unit)
 
 
 def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str], list[tuple[str, str, str]]]:
@@ -1192,6 +1194,7 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str], li
 
     for sheet in sheets:
         ws, wf = wb[sheet], wbf[sheet]
+        unit = "bp" if sheet == "Event_Rates" else "%"
         # --- interaction row ---
         kind = str(ws[f"B{ROW_INT}"].value or "").lower()
         int_fx = wf[f"D{ROW_INT}"].value
@@ -1279,7 +1282,7 @@ def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str], li
                                 f"= {base_sh * (1.0 - float(drop))}")
             else:
                 details.append(f"Reverse stress threshold OK: {sheet} default = base × (1 − {float(drop):.0%}) = {float(thr):.4f}")
-        exp_res = expected_reverse_result(grid, thr, base_sh)
+        exp_res = expected_reverse_result(grid, thr, base_sh, unit)
         got = ws[f"B{ROW_RESULT}"].value
         if isinstance(exp_res, float):
             ok = _close(got, exp_res, tol_abs=1e-9)

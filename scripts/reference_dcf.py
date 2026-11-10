@@ -554,6 +554,19 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
     return failures, details, ind
 
 
+def format_not_reached(pct: float, shock: float, unit: str) -> str:
+    """Label when no tested shock breaks the threshold. Matches the Excel TEXT() result.
+
+    Example: 'Not reached: worst is -18.2% at +200 basis points'.
+    """
+    pct_txt = f"{pct:.1%}"
+    if unit == "bp":
+        shock_txt = f"{shock:+.0f} basis points"
+    else:
+        shock_txt = f"{shock:+.1%}"
+    return f"Not reached: worst is {pct_txt} at {shock_txt}"
+
+
 # ---------------------------------------------------------------------------
 # Shock ladder + reverse stress test (independent of the Ladder sheet's formulas)
 # Layout must match generate.py LADDER_* constants.
@@ -676,8 +689,13 @@ def reconcile_ladder(path, tol_rel: float = 1e-4, tol_abs: float = 0.01):
             shocks, pct = pct_by_event[sh]
             ref = interpolate_reverse(shocks if shocks[0] <= shocks[-1] else shocks, pct, float(tgt))
             if ref is None:
+                unit = "bp" if sh == "Event_Rates" else "%"
+                wi = min(range(len(pct)), key=lambda i: pct[i])
+                exp = format_not_reached(pct[wi], shocks[wi], unit)
                 if isinstance(got, (int, float)):
                     failures.append(f"Ladder reverse {sh} target {tgt}: workbook {got} but ref is outside the ladder")
+                elif got != exp:
+                    failures.append(f"Ladder reverse {sh} target {tgt}: expected {exp!r}, got {got!r}")
             elif not isinstance(got, (int, float)) or abs(ref - float(got)) > max(1e-6, abs(ref) * tol_rel):
                 failures.append(f"Ladder reverse {sh} target {tgt}: ref {ref} != workbook {got}")
         wb2.close()

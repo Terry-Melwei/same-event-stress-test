@@ -32,41 +32,42 @@ Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF
 8. **Interaction-row integrity.** Each event table has an INT row, labelled "Cross-channel interaction (not size non-linearity)" and kind diagnostic, that is a live formula equal to (FULL − base) − Σ(standalone row − base).
    - It sums standalone rows only: never information or diagnostic rows. On a sequential ladder (each row adds one response to the previous row, as on the tariff sheet) it isolates the remaining separable channel; say so on the sheet.
    - It is outside FULL and outside the blend, and is not pasted. Recompute it from the channel rows and compare.
-9. **Both directions and reverse stress.** Each event shows FULL at the configured shock and at the mirrored shock (opposite sign) with an asymmetry line. Each event has a formula reverse-stress grid (ascending multiples) whose result cell reports the smallest tested shock that takes the FULL $/sh below the yellow threshold, or `n/a` when the threshold is blank. The default threshold is a live formula = base $/sh × (1 − drop %), drop % a yellow input (default 25%); a blank drop % gives `n/a`. A typed threshold is an override and needs a stated reason.
+9. **Both directions and reverse stress.** Each event shows FULL at the configured shock and at the mirrored shock (opposite sign) with an asymmetry line. Each event has a formula reverse-stress grid (ascending multiples) whose result cell reports the smallest tested shock that takes the FULL $/sh below the yellow threshold, or `n/a` when the threshold is blank, or `Not reached: worst is −X% at …` (the worst fall and shock on the grid) when nothing tested breaks the threshold. The default threshold is a live formula = base $/sh × (1 − drop %), drop % a yellow input (default 25%); a blank drop % gives `n/a`. A typed threshold is an override and needs a stated reason.
    - Test it: set a threshold between two grid steps, recalculate, and confirm the result is the first step below the threshold while the previous step is at or above it.
-10. **Calibration source.** Every shock size has a yellow calibration **source** (data set or document, with date) and **basis** (for example a historical 1-year 95th percentile move).
+10. **Shock ladder.** A Ladder sheet re-runs every event's FULL at yellow multiples of the configured shock (default −1.5× to +1.5×) with live formulas. The asymmetry at the ±1× rung equals the event sheet's mirror asymmetry (row 63) and the Summary. If a yellow % fall target is outside the ladder, the reverse-stress cell reads `Not reached: worst is −X% at …` rather than a bare "outside range".
+11. **Calibration source.** Every shock size has a yellow calibration **source** (data set or document, with date) and **basis** (for example a historical 1-year 95th percentile move).
     - `TO FILL` is acceptable only in an ILLUSTRATIVE template. A real-issuer workbook with `TO FILL`, or with a statistic that has no cited source, is BLOCK. Run the checker with `--strict-calibration`; it must PASS (without the flag, TO FILL is only a WARNING).
 
 ## 3. Economic invariants (Blocking)
-11. **Pass-through invariant.** Set 100% cost recovery and zero elasticity / markdowns / mitigation. Gross-profit dollars must stay unchanged in every forecast year.
+12. **Pass-through invariant.** Set 100% cost recovery and zero elasticity / markdowns / mitigation. Gross-profit dollars must stay unchanged in every forecast year.
    - Build an explicit units × price × unit cost bridge, with fixed costs kept separate.
-12. **Sign tests.** An isolated adverse input must lower value: a higher royalty, a higher tariff, a higher cost.
+13. **Sign tests.** An isolated adverse input must lower value: a higher royalty, a higher tariff, a higher cost.
    - Historical calibration inputs must be separate from forward-looking shock inputs, so a shock never re-fits history.
-13. **No financing double count.** EV uses operating cash flows only; no interest goes into FCFF.
+14. **No financing double count.** EV uses operating cash flows only; no interest goes into FCFF.
     - Financing effects enter the net-debt bridge or the WACC weights once.
     - Share counts change once, alongside the matching cash.
     - Capex-cycle funding: the capex outflow is already in FCFF, so only the equity-funded part moves net debt (paired with the new diluted shares); the debt-funded part adds debt and cash equally. Never add the full funding need to net debt as well.
-14. **No period overlap.** Stub-period cash, the balance-sheet date and the first explicit forecast year don't overlap.
-15. **Lease consistency.** If lease liabilities are in net debt, use EBITDAR-based cash flows (earnings before interest, tax, depreciation, amortisation and rent). Otherwise leave leases out of both. Never subtract them twice.
+15. **No period overlap.** Stub-period cash, the balance-sheet date and the first explicit forecast year don't overlap.
+16. **Lease consistency.** If lease liabilities are in net debt, use EBITDAR-based cash flows (earnings before interest, tax, depreciation, amortisation and rent). Otherwise leave leases out of both. Never subtract them twice.
 
 ## 4. Consistent bases (Blocking)
-16. Measure each FULL % change against its own method's base (an exit-multiple shock against the exit-method value, the rest against perpetual growth). Then apply that % change to the blended midpoint.
+17. Measure each FULL % change against its own method's base (an exit-multiple shock against the exit-method value, the rest against perpetual growth). Then apply that % change to the blended midpoint.
     - Label the result a "blended-mid sensitivity proxy".
     - Never divide one method's result by another method's base.
 
 ## 5. Market data and comps (Blocking if material)
-17. Use a live price with its date and source. Confirm the listing actually trades; otherwise value the primary listing and show any stale secondary quote as a reference only.
-18. Recompute peer EV as market cap + debt − cash from raw inputs. Spot-check 2–3 peer multiples against an outside source, and investigate any gap above about 20%.
+18. Use a live price with its date and source. Confirm the listing actually trades; otherwise value the primary listing and show any stale secondary quote as a reference only.
+19. Recompute peer EV as market cap + debt − cash from raw inputs. Spot-check 2–3 peer multiples against an outside source, and investigate any gap above about 20%.
 
 ## 6. Disclosure (Blocking for big judgment calls)
-19. Any judgment that changes value by more than about 10% (for example a chosen WACC instead of the raw CAPM, capital asset pricing model, rate) sits in a yellow cell. Show the raw-input value live on the Cover and Football, outside the blend.
-20. List data gaps as gaps. Never fill them with invented numbers.
+20. Any judgment that changes value by more than about 10% (for example a chosen WACC instead of the raw CAPM, capital asset pricing model, rate) sits in a yellow cell. Show the raw-input value live on the Cover and Football, outside the blend.
+21. List data gaps as gaps. Never fill them with invented numbers.
 
 ## 7. Presentation (fix before CLEAR)
-21. Colours: inputs in blue font, formulas in black, judgment cells with a yellow fill.
-22. A How_Measured sheet explains every method and every stress channel, plus the interaction row, mirror, reverse stress test, calibration cells and Summary sheet. Spell out each acronym on first use on each sheet.
-23. A real football-field chart and a tornado chart, both driven by formula ranges, covering every enabled event. A Summary sheet right after the Cover ranks the events by absolute FULL change in $/sh with live formulas.
-24. A "Draft, not investment advice" label on the Cover.
+22. Colours: inputs in blue font, formulas in black, judgment cells with a yellow fill.
+23. A How_Measured sheet explains every method and every stress channel, plus the interaction row, mirror, reverse stress test, Ladder sheet, calibration cells and Summary sheet. Spell out each acronym on first use on each sheet.
+24. A real football-field chart and a tornado chart, both driven by formula ranges, covering every enabled event. A Summary sheet right after the Cover ranks the events by absolute FULL change in $/sh with live formulas.
+25. A "Draft, not investment advice" label on the Cover.
 
 ## Verdict template
 ```
@@ -74,7 +75,8 @@ VERDICT: CLEAR | BLOCK
 Recomputed vs claimed: <method values, blended mid, 2+ FULL values>
 Live-input test: <input changed> -> <outputs moved: n/n>
 Interaction / asymmetry: <INT $/sh per event; mirrored FULL $/sh per event>
-Reverse stress: <threshold set -> result; previous step at/above threshold: yes/no>
+Reverse stress: <threshold set -> result; previous step at/above threshold: yes/no; Not reached wording if none>
+Ladder: <±1× asymmetry matches mirror / Summary: yes/no>
 Calibration: <source + basis per shock, or TO FILL (BLOCK for a real issuer)>
 Fixes (BLOCK only): 1. <issue> - <cell refs> - <required change>
 Non-blocking notes: ...

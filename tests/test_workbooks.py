@@ -29,7 +29,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from reference_dcf import base_equity_perp, capex_components, load_inputs_from_workbook  # noqa: E402
+from reference_dcf import base_equity_perp, capex_components, format_not_reached, load_inputs_from_workbook  # noqa: E402
 
 CASES = {
     "default_illustrative": ROOT / "templates" / "stress_template.xlsx",
@@ -232,8 +232,13 @@ def test_reverse_stress_threshold(recalculated, tmp_path, name):
             assert isinstance(formulas[sheet]["B66"].value, (int, float))
         grid = _grid(ws)
         below = [x for x, sh in grid if sh < ws["B66"].value]
-        expected = below[0] if below else "none in tested range"
-        assert ws["B67"].value == (pytest.approx(expected) if below else expected), (sheet, grid)
+        if below:
+            assert ws["B67"].value == pytest.approx(below[0]), (sheet, grid)
+        else:
+            shock, shv = min(grid, key=lambda p: p[1])
+            unit = "bp" if sheet == "Event_Rates" else "%"
+            expected = format_not_reached(shv / base_sh - 1.0, shock, unit)
+            assert ws["B67"].value == expected, (sheet, grid, ws["B67"].value)
     # 1b) Blank drop % (default formula) or blank threshold (typed override) -> 'n/a', also on Summary
     blank = tmp_path / f"{name}_blank.xlsx"
     wb = openpyxl.load_workbook(recalculated[name])
@@ -280,7 +285,11 @@ def test_reverse_stress_threshold(recalculated, tmp_path, name):
     wb.save(edge)
     out = openpyxl.load_workbook(_recalc(edge, tmp_path / "edge"), data_only=True)
     assert out["Event_Rates"]["B67"].value == "base already below threshold"
-    assert out[sheets[1]]["B67"].value == "none in tested range"
+    grid = _grid(out[sheets[1]])
+    shock, shv = min(grid, key=lambda p: p[1])
+    unit = "bp" if sheets[1] == "Event_Rates" else "%"
+    expected = format_not_reached(shv / base_sh - 1.0, shock, unit)
+    assert out[sheets[1]]["B67"].value == expected
 
 
 @needs_lo
@@ -301,3 +310,38 @@ def test_summary_ranks_by_abs_full_change(recalculated):
             assert sm[f"H{r}"].value == pytest.approx(deltas[s])
             assert sm[f"I{r}"].value == pytest.approx(wb[s]["G12"].value)
             assert sm[f"K{r}"].value == wb[s]["B67"].value
+
+
+@needs_lo
+def test_ladder_plus_one_matches_mirror(recalculated):
+    """Product manager's test: the ±1× rung's asymmetry equals the event-sheet mirror (and Summary)."""
+    for name, path in recalculated.items():
+        wb = openpyxl.load_workbook(path, data_only=True)
+        wf = openpyxl.load_workbook(path)
+        assert "Ladder" in wb.sheetnames, name
+        sheets = _event_sheets(wb)
+        # layout: first block starts at row 6, 12 rows per event, rungs at title+2 .. +8
+        for k, sheet in enumerate(sheets):
+            srow = 6 + 12 * k
+            # multiples in column B, rungs start at srow+2
+            rows = list(range(srow + 2, srow + 2 + 7))
+            mults = [wb["Ladder"][f"B{r}"].value for r in rows]
+            assert 1.0 in [float(m) for m in mults], (name, sheet, mults)
+            r1 = rows[[float(m) for m in mults].index(1.0)]
+            lad = wb["Ladder"][f"H{r1}"].value
+            mir = wb[sheet]["G63"].value
+            assert lad == pytest.approx(mir, abs=1e-4), (name, sheet, lad, mir)
+            assert wf["Ladder"][f"I{srow + 2}"].value is not None
+            assert str(wb["Ladder"][f"I{srow + 2}"].value) == "OK", (name, sheet)
+        # a -25% target that sits outside the ladder still names the worst fall
+        # (rates on default/gold/apparel often do not reach -25% by +1.5×)
+        # Just require any non-numeric reverse result to start with 'Not reached:'
+        from reference_dcf import ladder_layout
+        lay = ladder_layout(len(sheets))
+        for rr in lay["rev_rows"]:
+            for k, sheet in enumerate(sheets):
+                got = wb["Ladder"].cell(rr, 2 + k).value
+                if not isinstance(got, (int, float)):
+                    assert isinstance(got, str) and got.startswith("Not reached:"), (name, sheet, got)
+        wb.close()
+        wf.close()

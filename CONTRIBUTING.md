@@ -7,7 +7,7 @@
 - Keep the method **same-event**: one shock per table, channel rows plus FULL.
 - Preserve wiring rules: free cash flow to the firm (FCFF) operating-only; financing once in the net-debt bridge / weighted average cost of capital (WACC); rates interest and buyback as information rows outside FULL; commodity revenue/opex separated; live formulas; own-base %Δ applied to the blended mid and labelled blended-mid sensitivity proxy.
 - Label rows standalone / cumulative / information / diagnostic; keep information and diagnostic rows out of FULL.
-- Keep the per-event blocks at their fixed rows (interaction row 12, calibration 54–57, mirror 60–63, reverse stress 65–76, helpers 80–88); `check_workbook.py`, `reference_dcf.py` and the tests read those cells. If you move them, update all three.
+- Keep the per-event blocks at their fixed rows (interaction row 12, calibration 54–57, mirror 60–63, reverse stress 65–76, helpers 80–88, ladder helpers 90–97); `check_workbook.py`, `reference_dcf.py` and the tests read those cells. If you move them, update all three.
 - Shock calibration cells ship as `TO FILL: source` / `TO FILL: basis`. Never replace them with an uncited statistic.
 - Run `python -m pytest -v` (needs LibreOffice for the recalculation tests) and `check_workbook.py --regression` on every shipped workbook before opening a pull request. Code must stay valid on Python 3.11.
 - Discretionary assumptions use **yellow fill + blue font**.
