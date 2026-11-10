@@ -4,8 +4,8 @@
 
 ## Scope
 
-- Keep the method **same-event**: one shock per table, channel rows plus FULL.
-- Preserve wiring rules: free cash flow to the firm (FCFF) operating-only; financing once in the net-debt bridge / weighted average cost of capital (WACC); rates interest and buyback as information rows outside FULL; commodity revenue/opex separated; live formulas; own-base %Δ applied to the blended mid and labelled blended-mid sensitivity proxy.
+- Keep the method **same-event**: one shock per table, channel rows plus FULL (all channels of one event applied together).
+- Preserve wiring rules: free cash flow to the firm (FCFF) operating-only; financing once in the net-debt bridge / weighted average cost of capital (WACC); rates interest and buyback as information rows outside FULL; commodity revenue/operating expenses (opex) separated; live formulas; own-base percentage change (%Δ) applied to the blended mid and labelled blended-mid sensitivity proxy.
 - Label rows standalone / cumulative / information / diagnostic; keep information and diagnostic rows out of FULL.
 - Keep the per-event blocks at their fixed rows (interaction row 12, shock calibration 54–58, mirror 60–63, covenant note 64, reverse stress 65–76, helpers 80–88, ladder helpers 90–97); `check_workbook.py`, `reference_dcf.py` and the tests read those cells. If you move them, update all three.
 - Shock calibration cells (rows 54–58) are: 54 title, 55 the shock size used by FULL, 56 yellow **source**, 57 yellow **basis**, 58 yellow **severity** (plausible, severe or extreme). Ship the yellow cells as `TO FILL: source` / `TO FILL: basis` / `TO FILL: severity`. Never replace them with an uncited statistic.

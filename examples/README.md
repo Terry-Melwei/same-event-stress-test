@@ -2,7 +2,7 @@
 
 **Draft, not investment advice.** All three cases below use invented names and round ILLUSTRATIVE numbers. They are teaching walkthroughs of which shocks to run and which channels each shock moves. They are not valuations of any real issuer.
 
-Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = cross-channel interaction row (not size non-linearity). WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together. EBITDA = earnings before interest, tax, depreciation and amortisation (in this model, EBIT + D&A). EBIT = earnings before interest and tax. D&A = depreciation and amortisation. $/sh = US dollars per diluted share.
+Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = cross-channel interaction row (not size non-linearity). WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together. EBIT = earnings before interest and tax. D&A = depreciation and amortisation. EBITDA = earnings before interest, tax, depreciation and amortisation (in this model, EBIT + D&A). opex = operating expenses. %Δ = percentage change. $/sh = US dollars per diluted share.
 
 ---
 
@@ -36,7 +36,7 @@ Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present val
 
 ## Case 2 — Illustrative specialty apparel retailer (“Harbor Lane Apparel”, ILLUSTRATIVE)
 
-**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC about 8% (no override); terminal growth 2.5%; exit multiple 9× EBITDA. Config: [configs/apparel_retailer.yaml](configs/apparel_retailer.yaml). The workbook also has a blue net debt / Year-1 EBITDA covenant limit of 0.35×, labelled ILLUSTRATIVE, replace with your own loan limit. A real covenant limit comes from the company's loan agreement; the yellow source cell ships as `TO FILL: cite the loan agreement clause`.
+**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC about 8% (no override); terminal growth 2.5%; exit multiple 9× EBITDA. Config: [configs/apparel_retailer.yaml](configs/apparel_retailer.yaml). The workbook also has a blue net debt / Year-1 EBITDA covenant limit of 0.35×, labelled ILLUSTRATIVE, replace with your own loan limit. A real covenant limit comes from the company's loan agreement; the yellow source cell ships as `TO FILL: cite the loan agreement clause`. Covenant flags show BREACH in red and PASS in light green (live conditional formatting).
 
 **Shocks run (each in its own table):**
 

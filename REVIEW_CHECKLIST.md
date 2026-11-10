@@ -4,7 +4,7 @@ Use this checklist to review (gate) a valuation workbook before anyone relies on
 The verdict is **CLEAR** only if every Blocking check passes. Otherwise it is **BLOCK**, with a numbered list of fixes that cites cells.
 CLEAR means the workbook is built correctly. It does not mean the valuation assumptions are endorsed.
 
-Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow to firm. EV = enterprise value. GP = gross profit. Capex = capital expenditure. PV = present value. $/sh = US dollars per diluted share. %Δ = percentage change. FULL row = the result of one event with all of its channels applied together. INT row = the cross-channel interaction (not size non-linearity) diagnostic (FULL minus the standalone channel rows at one shock size). D&A = depreciation and amortisation. EBIT = earnings before interest and tax. EBITDA = earnings before interest, tax, depreciation and amortisation (in this model, EBIT + D&A). FX = foreign exchange.
+Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow to firm. EV = enterprise value. GP = gross profit. Capex = capital expenditure. PV = present value. $/sh = US dollars per diluted share. %Δ = percentage change. FULL row = the result of one event with all of its channels applied together. INT row = the cross-channel interaction (not size non-linearity) diagnostic (FULL minus the standalone channel rows at one shock size). D&A = depreciation and amortisation. EBIT = earnings before interest and tax. EBITDA = earnings before interest, tax, depreciation and amortisation (in this model, EBIT + D&A). FX = foreign exchange. opex = operating expenses.
 
 ## 1. Live wiring (Blocking)
 1. **Live-input test.**
@@ -62,7 +62,7 @@ Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF
 19. Recompute peer EV as market cap + debt − cash from raw inputs. Spot-check 2–3 peer multiples against an outside source, and investigate any gap above about 20%.
 
 ## 6. Disclosure (Blocking for big judgment calls)
-20. Any judgment that changes value by more than about 10% (for example a chosen WACC instead of the raw CAPM, capital asset pricing model, rate) sits in a yellow cell. Show the raw-input value live on the Cover and Football, outside the blend.
+20. Any judgment that changes value by more than about 10% (for example a chosen WACC instead of the raw capital asset pricing model (CAPM) rate) sits in a yellow cell. Show the raw-input value live on the Cover and Football, outside the blend.
 21. List data gaps as gaps. Never fill them with invented numbers.
 
 ## 7. Presentation (fix before CLEAR)

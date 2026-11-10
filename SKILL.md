@@ -1,6 +1,6 @@
 ---
 name: same-event-stress-test
-description: Use when stress-testing a stock's valuation against one market shock at a time (interest rates, commodity prices, tariffs, foreign exchange, demand, regulation), or when building or reviewing a same-event multi-channel stress test (every transmission channel, FULL row, tornado, envelope and football-field charts) for a discounted cash flow (DCF) or similar model. Also use for "what happens to the share price if rates rise 100bp", "how exposed is this stock to copper", "is the downside bigger than the upside", or "how big a shock would cut value by a quarter".
+description: Use when stress-testing a stock's valuation against one market shock at a time (interest rates, commodity prices, tariffs, foreign exchange, demand, regulation), or when building or reviewing a same-event multi-channel stress test (every transmission channel, FULL (all channels of one event applied together) row, tornado, envelope and football-field charts) for a discounted cash flow (DCF) or similar model. Also use for "what happens to the share price if rates rise 100 basis points (bp)", "how exposed is this stock to copper", "is the downside bigger than the upside", or "how big a shock would cut value by a quarter".
 ---
 
 # Same-event multi-channel stress test
@@ -58,7 +58,7 @@ Shock example: ±100 basis points (bp). Stress the **selected** weighted average
 | C | standalone | Fixed-debt mark-to-market | Fair-value adjustment inside the **net-debt bridge** only |
 | D | information | Profit / earnings per share (EPS) | Communication only; **outside FULL** |
 | E | information | Buyback capacity | Communication only; **outside FULL** so the same interest cash is not subtracted twice |
-| FULL | cumulative | A + C | WACC channel + MTM bridge — financing once; B/D/E excluded |
+| FULL | cumulative | A + C | WACC channel + mark-to-market (MTM) bridge — financing once; B/D/E excluded |
 
 ### Commodity price
 
@@ -150,7 +150,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 
 ## Wiring rules
 
-1. **FCFF is operating-only.** Free cash flow to the firm excludes interest and financing cash. Financing enters **once** in the net-debt bridge (and WACC weights as designed). On the rates sheet, interest and buyback capacity are **information** rows outside FULL so the same cash interest is never subtracted twice. Never push interest into FCFF or double-count the tax shield. Stress **selected WACC + Δ**, not a rebuilt CAPM path that ignores a yellow WACC override.
+1. **FCFF is operating-only.** Free cash flow to the firm excludes interest and financing cash. Financing enters **once** in the net-debt bridge (and WACC weights as designed). On the rates sheet, interest and buyback capacity are **information** rows outside FULL so the same cash interest is never subtracted twice. Never push interest into FCFF or double-count the tax shield. Stress **selected WACC + Δ**, not a rebuilt capital asset pricing model (CAPM) path that ignores a yellow WACC override.
 2. **One event per table.** Channel rows A/B/C… plus FULL. No stacking of separate events.
 3. **Own-base %Δ → blended mid.** For each FULL row, %Δ = (stressed method value − that method’s base) / that method’s base. Apply %Δ to the blended midpoint. Label outputs **blended-mid sensitivity proxy**. Never divide one method’s result by another method’s base.
 4. **Charts follow FULL rows.** Tornado, envelope (MIN/MAX over **every** enabled event), football-field stress bands and the Summary ranking are formula-linked to FULL outputs.
@@ -182,7 +182,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 
 ## Workflow
 
-1. **Build** the base DCF (or related model) with live formulas, diluted shares, operating-only FCFF, separate revenue/opex lines, and a clean net-debt bridge. Or generate from YAML: `python scripts/generate.py --config examples/configs/<case>.yaml --out <out.xlsx>`.
+1. **Build** the base DCF (or related model) with live formulas, diluted shares, operating-only FCFF, separate revenue/opex lines, and a clean net-debt bridge. Or generate from YAML (YAML Ain't Markup Language, the plain-text configuration format): `python scripts/generate.py --config examples/configs/<case>.yaml --out <out.xlsx>`.
 2. **Add one event table per shock**, with channel rows labelled standalone / cumulative / information / diagnostic, and a FULL row that excludes information/diagnostic rows. Add the interaction row, the mirror, the reverse-stress grid and the calibration cells under it. Fill the calibration source/basis or leave them `TO FILL`.
 3. **Wire** tornado, envelope, football field (tables + charts) and the Summary sheet to the FULL rows; label blended-mid sensitivity proxies.
 4. **Recalculate** (LibreOffice or Excel). Regeneration leaves formula caches empty until recalc.
@@ -204,7 +204,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 | Capex funding counted in FCFF **and** again as new debt in the bridge | Debt-funded part adds debt and cash equally; only the equity part moves net debt, paired with new diluted shares |
 | A "shock size" with no source | Yellow calibration source + basis cells; `TO FILL` until sourced |
 | Interaction row typed in, or summing information rows | Live formula over standalone rows only; checker recomputes it |
-| D&A subtracted twice (once inside opex, again below EBIT) | Opex % includes D&A; FCFF = NOPAT + D&A − capex − ΔNWC adds it back once |
+| D&A subtracted twice (once inside opex, again below EBIT) | Opex % includes D&A; FCFF = NOPAT (net operating profit after tax) + D&A − capex − ΔNWC adds it back once |
 | One-directional shock reported as "the" sensitivity | Run adverse and favourable sizes; report both and the downside / upside ratio |
 | Shock size picked without justification | Anchor to a cited historical move and label it plausible, severe or extreme |
 

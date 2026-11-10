@@ -1692,7 +1692,13 @@ def _rewrite_chart_xml(src: Path, dst: Path, old: str, new: str) -> None:
             zout.writestr(item, data)
 
 def run_regression_mutations(good: Path, config: Path | None) -> int:
-    """Reviewer mutations (13, or 16 with Event_Capex) — each must FAIL."""
+    """Reviewer mutations — each must FAIL.
+
+    The count varies by which events are enabled: 17 on the template
+    and the gold miner, 19 on apparel (with foreign-exchange and
+    demand events), and 20 on the optical supplier (with the
+    capital-expenditure event).
+    """
     results = []
 
     def record(name, rc, reason):
