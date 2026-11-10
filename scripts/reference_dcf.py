@@ -552,3 +552,135 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
 
     ind["_proxies"] = proxies  # type: ignore
     return failures, details, ind
+
+
+# ---------------------------------------------------------------------------
+# Shock ladder + reverse stress test (independent of the Ladder sheet's formulas)
+# Layout must match generate.py LADDER_* constants.
+# ---------------------------------------------------------------------------
+LADDER_FIRST_BLOCK = 6
+LADDER_BLOCK_ROWS = 12
+LADDER_N_RUNGS = 7
+LADDER_N_TARGETS = 2
+
+
+def ladder_layout(n_events: int) -> dict:
+    blocks = []
+    for k in range(n_events):
+        s = LADDER_FIRST_BLOCK + LADDER_BLOCK_ROWS * k
+        blocks.append({"title": s, "rows": list(range(s + 2, s + 2 + LADDER_N_RUNGS))})
+    rev_title = LADDER_FIRST_BLOCK + LADDER_BLOCK_ROWS * n_events + 1
+    return {"blocks": blocks, "rev_title": rev_title, "rev_hdr": rev_title + 1,
+            "rev_rows": list(range(rev_title + 2, rev_title + 2 + LADDER_N_TARGETS))}
+
+
+def event_sheets(sheetnames) -> list[str]:
+    return [s for s in sheetnames if s in ("Event_Rates", "Event_Commodity", "Event_Tariff", "Event_Capex")]
+
+
+def interpolate_reverse(grid: list[float], pct: list[float], target: float):
+    """Same rule as the Ladder sheet: average of crossings over adjacent rungs (rungs sorted by multiple)."""
+    hits = []
+    for (x0, y0), (x1, y1) in zip(zip(grid, pct), zip(grid[1:], pct[1:])):
+        if (y0 - target) * (y1 - target) <= 0 and y0 != y1:
+            hits.append(x0 + (target - y0) * (x1 - x0) / (y1 - y0))
+    return None if not hits else sum(hits) / len(hits)
+
+
+def solve_shock_for_drop(f, base: float, target: float, lo: float, hi: float, tol: float = 1e-10):
+    """Bisection for shock s in [lo, hi] with f(s)/base - 1 = target. None if not bracketed."""
+    g = lambda s: f(s) / base - 1.0 - target  # noqa: E731
+    glo, ghi = g(lo), g(hi)
+    if glo * ghi > 0:
+        return None
+    for _ in range(300):
+        mid = 0.5 * (lo + hi)
+        gm = g(mid)
+        if abs(gm) < tol:
+            return mid
+        if glo * gm <= 0:
+            hi = mid
+        else:
+            lo, glo = mid, gm
+    return 0.5 * (lo + hi)
+
+
+def reconcile_ladder(path, tol_rel: float = 1e-4, tol_abs: float = 0.01):
+    """Rebuild every ladder rung, asymmetry and reverse-stress interpolation from Inputs + grid inputs."""
+    failures: list[str] = []
+    details: list[str] = []
+    wb = load_workbook(path, data_only=True)
+    if "Ladder" not in wb.sheetnames:
+        wb.close()
+        return ["Ladder sheet missing"], details
+    ld = wb["Ladder"]
+    sheets = event_sheets(wb.sheetnames)
+    mirror_asym = {sh: wb[sh]["G63"].value for sh in sheets}
+    wb.close()
+    m = load_inputs_from_workbook(path)
+    base = base_equity_perp(m)
+    blend = blended_mid(m)
+    blend_sh = blend / m.diluted_shares
+    lay = ladder_layout(len(sheets))
+    pct_by_event = {}
+    for k, (sh, blk) in enumerate(zip(sheets, lay["blocks"])):
+        rows = blk["rows"]
+        conf = configured_shock(m, sh)
+        mults, shocks, pct, sh_vals = [], [], [], []
+        for r in rows:
+            mult = ld.cell(r, 2).value
+            if mult is None:
+                failures.append(f"Ladder {sh} row {r}: missing multiple")
+                continue
+            x = conf * float(mult)
+            ref = full_at(m, sh, x)
+            got_c, got_d, got_f, got_g = (ld.cell(r, c).value for c in (3, 4, 6, 7))
+            if got_c is None or abs(float(got_c) - x) > 1e-9 * max(1.0, abs(x)):
+                failures.append(f"Ladder {sh} row {r}: shock {got_c} != configured x multiple {x}")
+            if got_d is None or abs(ref - float(got_d)) > max(tol_abs, abs(ref) * tol_rel):
+                failures.append(f"Ladder {sh} row {r} (x{mult}): FULL ref {ref:.4f} != workbook {got_d}")
+            p = ref / base - 1.0
+            if got_f is None or abs(float(got_f) - p) > 1e-6:
+                failures.append(f"Ladder {sh} row {r}: % change {got_f} != ref {p:.6f}")
+            ps = blend_sh * (1.0 + p)
+            if got_g is None or abs(float(got_g) - ps) > max(1e-4, abs(ps) * tol_rel):
+                failures.append(f"Ladder {sh} row {r}: proxy $/sh {got_g} != ref {ps:.6f}")
+            mults.append(float(mult)); shocks.append(x); pct.append(p); sh_vals.append(ps)
+        n = len(rows)
+        if len(mults) == n:
+            if mults != sorted(mults) or any(abs(mults[i] + mults[n - 1 - i]) > 1e-12 for i in range(n)):
+                failures.append(f"Ladder {sh}: multiples must be ascending and symmetric around 0, got {mults}")
+            for i, r in enumerate(rows):
+                ref_a = (sh_vals[i] - blend_sh) + (sh_vals[n - 1 - i] - blend_sh)
+                got = ld.cell(r, 8).value
+                if got is None or abs(float(got) - ref_a) > max(1e-4, abs(ref_a) * tol_rel):
+                    failures.append(f"Ladder {sh} row {r}: asymmetry $/sh {got} != ref {ref_a:.6f}")
+            # acceptance: the +/-1x rung reproduces the event sheet's mirror asymmetry (and Summary)
+            if 1.0 in mults:
+                i1 = mults.index(1.0)
+                a1 = (sh_vals[i1] - blend_sh) + (sh_vals[n - 1 - i1] - blend_sh)
+                ma = mirror_asym.get(sh)
+                if ma is None or abs(float(ma) - a1) > max(1e-4, abs(a1) * tol_rel):
+                    failures.append(f"Ladder {sh}: +/-1x asymmetry {a1:.6f} != {sh}!G63 mirror asymmetry {ma}")
+            else:
+                failures.append(f"Ladder {sh}: no +/-1x rung to tie to the mirror asymmetry")
+            pct_by_event[sh] = (shocks, pct)
+    for ti, rr in enumerate(lay["rev_rows"]):
+        wb2 = load_workbook(path, data_only=True)
+        ldv = wb2["Ladder"]
+        tgt = ldv.cell(rr, 1).value
+        for k, sh in enumerate(sheets):
+            got = ldv.cell(rr, 2 + k).value
+            if tgt is None or sh not in pct_by_event:
+                continue
+            shocks, pct = pct_by_event[sh]
+            ref = interpolate_reverse(shocks if shocks[0] <= shocks[-1] else shocks, pct, float(tgt))
+            if ref is None:
+                if isinstance(got, (int, float)):
+                    failures.append(f"Ladder reverse {sh} target {tgt}: workbook {got} but ref is outside the ladder")
+            elif not isinstance(got, (int, float)) or abs(ref - float(got)) > max(1e-6, abs(ref) * tol_rel):
+                failures.append(f"Ladder reverse {sh} target {tgt}: ref {ref} != workbook {got}")
+        wb2.close()
+    if not failures:
+        details.append("Ladder rungs, asymmetry (tied to each mirror at +/-1x) and reverse-stress interpolation reconcile to the independent reference")
+    return failures, details

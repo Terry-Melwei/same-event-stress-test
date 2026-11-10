@@ -28,6 +28,8 @@ from openpyxl import load_workbook
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from reference_dcf import (  # noqa: E402
+    ladder_layout,
+    reconcile_ladder,
     blended_mid,
     base_equity_perp,
     capex_components,
@@ -1345,6 +1347,68 @@ def calibration_messages(to_fill: list[tuple[str, str, str]], strict: bool) -> t
     return [msg + " Use --strict-calibration to make this a FAIL."], []
 
 
+
+def verify_ladder_structure(path: Path) -> tuple[list[str], list[str]]:
+    """Ladder outputs must be live formulas, and each chart must plot FULL equity (D) against shock size (C)."""
+    import zipfile
+    from openpyxl.utils import get_column_letter
+    failures: list[str] = []
+    details: list[str] = []
+    wb = load_workbook(path, data_only=False)
+    if "Ladder" not in wb.sheetnames:
+        wb.close()
+        return ["Ladder sheet missing"], details
+    ld = wb["Ladder"]
+    sheets = event_sheets(path)
+    lay = ladder_layout(len(sheets))
+    for sh, blk in zip(sheets, lay["blocks"]):
+        for r in blk["rows"]:
+            for c in "CDEFGH":
+                v = ld[f"{c}{r}"].value
+                if not (isinstance(v, str) and v.startswith("=")):
+                    failures.append(f"Ladder!{c}{r} ({sh}) is not a formula: {v!r}")
+            d = ld[f"D{r}"].value
+            if isinstance(d, str) and not d.startswith(f"={sh}!"):
+                failures.append(f"Ladder!D{r} must link to {sh}'s helper row, got {d}")
+    for rr in lay["rev_rows"]:
+        for k in range(len(sheets)):
+            v = ld.cell(rr, 2 + k).value
+            if not (isinstance(v, str) and v.startswith("=")):
+                failures.append(f"Ladder!{get_column_letter(2 + k)}{rr} reverse result is not a formula: {v!r}")
+    wb.close()
+    # chart series references
+    with zipfile.ZipFile(path) as z:
+        charts = sorted(n for n in z.namelist() if n.startswith("xl/charts/chart") and n.endswith(".xml"))
+        found = []
+        for n in charts:
+            x = z.read(n).decode("utf-8", "ignore")
+            xv = re.findall(r"<c:xVal>.*?<c:f>(.*?)</c:f>", x, re.S)
+            yv = re.findall(r"<c:yVal>.*?<c:f>(.*?)</c:f>", x, re.S)
+            if xv and yv and "Ladder" in xv[0]:
+                found.append((xv[0].replace("'", ""), yv[0].replace("'", "")))
+    want = []
+    for blk in lay["blocks"]:
+        a, b = blk["rows"][0], blk["rows"][-1]
+        want.append((f"Ladder!$C${a}:$C${b}", f"Ladder!$D${a}:$D${b}"))
+    missing = [w for w in want if w not in found]
+    if missing:
+        failures.append(f"Ladder charts: expected series not found {missing}; found {found}")
+    if not failures:
+        details.append(f"Ladder structure: rungs and reverse results live; {len(want)} charts plot FULL equity vs shock size")
+    return failures, details
+
+
+
+def _rewrite_chart_xml(src: Path, dst: Path, old: str, new: str) -> None:
+    """Copy an xlsx, replacing a range string inside chart XML only (keeps cached values)."""
+    import zipfile
+    with zipfile.ZipFile(src) as zin, zipfile.ZipFile(dst, "w", zipfile.ZIP_DEFLATED) as zout:
+        for item in zin.infolist():
+            data = zin.read(item.filename)
+            if item.filename.startswith("xl/charts/chart") and item.filename.endswith(".xml"):
+                data = data.decode("utf-8").replace(old, new).encode("utf-8")
+            zout.writestr(item, data)
+
 def run_regression_mutations(good: Path, config: Path | None) -> int:
     """Reviewer mutations (13, or 16 with Event_Capex) — each must FAIL."""
     results = []
@@ -1562,6 +1626,28 @@ def run_regression_mutations(good: Path, config: Path | None) -> int:
             if not record("Envelope!B9=MIN(B5:B7) with capex", rc, "envelope coverage"):
                 return 1
 
+
+        # 17-19) Shock ladder
+        lay = ladder_layout(len(event_sheets(good)))
+        rates_rows = lay["blocks"][0]["rows"]
+        r_plus1 = rates_rows[5]
+        print("=== 17) Ladder rung links to the wrong helper (mirror rung) ===")
+        rc = mutate("ladder_wrong", {f"Ladder!D{r_plus1}": f"=Event_Rates!G{91 + 1}"})
+        if not record(f"Ladder!D{r_plus1} wrong rung", rc, "ladder rung != independent FULL"):
+            return 1
+        print("=== 18) Reverse-stress result pasted ===")
+        rr0 = lay["rev_rows"][0]
+        rc = mutate("ladder_rev_paste", {f"Ladder!B{rr0}": 100})
+        if not record(f"Ladder!B{rr0} pasted 100", rc, "reverse result not live / mismatch"):
+            return 1
+        print("=== 19) Ladder chart plots % change instead of equity ===")
+        src = td_path / "mut_ladder_chart.xlsx"
+        a, b = rates_rows[0], rates_rows[-1]
+        _rewrite_chart_xml(good, src, f"$D${a}:$D${b}", f"$F${a}:$F${b}")
+        rc = main_check(src, config, skip_recalc=True, run_regression=False)
+        if not record("Ladder chart y -> F (% change)", rc, "chart series wrong"):
+            return 1
+
     print("\n=== Regression table ===")
     print(f"{'mutation':<42} {'result':<6} reason")
     for name, status, reason in results:
@@ -1675,6 +1761,14 @@ def main_check(
         cal_warn, cal_fail = calibration_messages(to_fill, strict_calibration)
         warnings.extend(cal_warn)
         failures.extend(cal_fail)
+
+        # Shock ladder + reverse stress test (independent reference; ±1× rung tied to mirror asymmetry)
+        ls_fail, ls_detail = verify_ladder_structure(workbook)
+        failures.extend(ls_fail)
+        details.extend(ls_detail)
+        ld_fail, ld_detail = reconcile_ladder(base)
+        failures.extend(ld_fail)
+        details.extend(ld_detail)
 
         # Tariff-specific: if Event_Tariff present, FULL equity < base at configured <100% PT
         if second == "Event_Tariff":

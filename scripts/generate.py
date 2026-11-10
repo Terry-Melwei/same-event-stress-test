@@ -466,6 +466,7 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     _build_envelope(wb, event_list)
     _build_football(wb, event_list)
     _build_passthrough(wb, pt)
+    _build_ladder(wb, event_list)
     _build_summary(wb, event_list)
     _build_how_measured(wb, event_list)
     cover = wb["Cover"]
@@ -2012,6 +2013,7 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
         "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. No goal seek, no macros.",
         "Shock calibration (rows 54–57): yellow source and basis cells for each shock size (for example a historical 1-year 95th percentile move). Shipped as TO FILL; never invent a statistic.",
+        "Ladder sheet: each event's FULL re-run at yellow multiples of its configured shock (default −1.5× to +1.5×), both directions, via helper rows 90–97 on each event sheet. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a check cell. The reverse stress test there interpolates the shock that cuts FULL equity by each yellow % target; scripts/reverse_stress.py solves it exactly.",
         "Summary sheet: ranks every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas; shows down-case / up-case, %Δ, interaction, asymmetry and reverse-stress result. Outside the blend.",
         "PassThrough: units × price × unit cost with fixed cost separate; invariant at 100% pass-through and zero elasticity/markdowns/mitigation.",
         "Review: run REVIEW_CHECKLIST.md and write CLEAR or BLOCK.",
@@ -2046,6 +2048,135 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Wrote {args.out}")
     print("Note: formula caches are empty until you recalculate (LibreOffice or Excel).")
     return 0
+
+
+# ---------------------------------------------------------------------------
+# Shock ladder + reverse stress test: each event's FULL at several sizes, both directions
+# ---------------------------------------------------------------------------
+LADDER_MULTIPLES = [-1.5, -1.0, -0.5, 0.0, 0.5, 1.0, 1.5]
+LADDER_TARGETS = [-0.10, -0.25]
+LADDER_FIRST_BLOCK = 6
+LADDER_BLOCK_ROWS = 12
+ROW_LADDER_HELP_TITLE = 90
+ROW_LADDER_HELP_FIRST = 91  # 7 ladder helpers 91..97 on each event sheet
+
+
+def _build_ladder(wb: Workbook, event_list) -> None:
+    from openpyxl.chart import ScatterChart, Series
+
+    ld = wb.create_sheet("Ladder")
+    ld["A1"] = "Shock ladder and reverse stress test: each event's FULL valuation at several sizes, both directions"
+    ld["A1"].font = TITLE
+    ld["A2"] = (
+        "Each rung re-runs the SAME event's FULL (all valuation channels together) at a multiple of the configured shock, using the "
+        "event sheet's own helper construction. Asymmetry ($/sh) = (proxy at +k − base) + (proxy at −k − base); the ±1× rung equals "
+        "the event sheet's mirror asymmetry and the Summary. A straight-line response shows zero asymmetry on every rung. Multiples and "
+        "drop targets are judgment inputs (yellow). Draft, not investment advice."
+    )
+    ld["A2"].font = MUTED
+    ld["A2"].alignment = Alignment(wrap_text=True)
+    ld.merge_cells("A2:J4")
+    heads = ["Rung", "Multiple of configured shock", "Shock size", "FULL equity ($m, perp. method)",
+             "Change vs base ($m)", "% change vs base", "Proxy $/sh diluted", "Asymmetry ($/sh)"]
+    blocks = []
+    for k, (sheet, label, _cfg) in enumerate(event_list):
+        spec = EVENT_SPECS[sheet]
+        shock = spec["shock_ref"]
+        shock_q = f"{sheet}!{shock}" if shock.startswith("$") else shock
+        ws = wb[sheet]
+        writer = HELPER_WRITERS[sheet]
+        ws[f"A{ROW_LADDER_HELP_TITLE}"] = "Helper rows for the Ladder sheet (live formulas; same construction as the FULL row)"
+        ws[f"A{ROW_LADDER_HELP_TITLE}"].font = HEADER
+        s = LADDER_FIRST_BLOCK + LADDER_BLOCK_ROWS * k
+        ld.cell(s, 1, f"{label} ({spec['unit']}); event sheet {sheet}").font = HEADER
+        for c, h in enumerate(heads, 1):
+            cell = ld.cell(s + 1, c, h)
+            cell.font = HEADER
+            cell.fill = LIGHT
+            cell.border = THIN
+        rows = list(range(s + 2, s + 2 + len(LADDER_MULTIPLES)))
+        n = len(rows)
+        for i, (r, mult) in enumerate(zip(rows, LADDER_MULTIPLES)):
+            ld.cell(r, 1, i + 1)
+            ld.cell(r, 2, mult)
+            style_judgment(ld.cell(r, 2))
+            ld.cell(r, 2).number_format = '0.0"×"'
+            ld.cell(r, 3, f"={shock_q}*$B{r}")
+            ld.cell(r, 3).number_format = spec["fmt"]
+            hrow = ROW_LADDER_HELP_FIRST + i
+            ws[f"A{hrow}"] = f"Ladder rung {i + 1}"
+            ref = writer(ws, hrow, f"Ladder!$C${r}")
+            ld.cell(r, 4, f"={sheet}!{ref}")
+            ld.cell(r, 5, f"=D{r}-DCF!$B$28")
+            ld.cell(r, 6, f"=E{r}/DCF!$B$28")
+            ld.cell(r, 7, f"=DCF!$B$33*(1+F{r})")
+            mirror = rows[n - 1 - i]
+            ld.cell(r, 8, f"=(G{r}-DCF!$B$33)+(G{mirror}-DCF!$B$33)")
+            for c, fmt in ((4, "#,##0.0"), (5, "#,##0.0"), (6, "0.0%"), (7, "0.00"), (8, "0.00")):
+                ld.cell(r, c).number_format = fmt
+            for c in range(1, 9):
+                ld.cell(r, c).border = THIN
+            for c in range(3, 9):
+                style_formula(ld.cell(r, c))
+        r1 = rows[LADDER_MULTIPLES.index(1.0)]
+        ld.cell(s + 1, 9, "Check: ±1× = mirror").font = HEADER
+        ld.cell(s + 2, 9, f'=IF(ABS(H{r1}-{sheet}!$G${ROW_MIRROR_ASYM})<0.0001,"OK","CHECK")')
+        style_formula(ld.cell(s + 2, 9))
+        blocks.append((sheet, label, spec, rows))
+
+    # ---- Reverse stress test by % fall in value ----
+    rt = LADDER_FIRST_BLOCK + LADDER_BLOCK_ROWS * len(event_list) + 1
+    ld.cell(rt, 1, "Reverse stress test: shock size that takes FULL equity down by the target (interpolated between rungs)").font = HEADER
+    ld.cell(rt + 1, 1, "Target change in equity").font = HEADER
+    ld.cell(rt + 1, 1).fill = LIGHT
+    for k, (sheet, label, spec, rows) in enumerate(blocks):
+        cell = ld.cell(rt + 1, 2 + k, f"{label}: shock needed ({spec['unit']})")
+        cell.font = HEADER
+        cell.fill = LIGHT
+        cell.border = THIN
+    helper_col0 = 12  # L onward: one helper column per (event, target)
+    ld.cell(LADDER_FIRST_BLOCK - 1, helper_col0,
+            "Helper: crossings between adjacent rungs for the reverse stress test (blank = target not in that interval)").font = MUTED
+    for ti, tgt in enumerate(LADDER_TARGETS):
+        rr = rt + 2 + ti
+        ld.cell(rr, 1, tgt)
+        style_judgment(ld.cell(rr, 1))
+        ld.cell(rr, 1).number_format = "0%"
+        for k, (sheet, label, spec, rows) in enumerate(blocks):
+            hc = get_column_letter(helper_col0 + ti * len(blocks) + k)
+            ld[f"{hc}{rows[0] - 1}"] = f"{sheet} target {ti + 1}"
+            for a, b in zip(rows[:-1], rows[1:]):
+                t = f"$A${rr}"
+                ld[f"{hc}{a}"] = (
+                    f'=IF(AND((F{a}-{t})*(F{b}-{t})<=0,F{a}<>F{b}),C{a}+({t}-F{a})*(C{b}-C{a})/(F{b}-F{a}),"")'
+                )
+                style_formula(ld[f"{hc}{a}"])
+            rng = f"{hc}{rows[0]}:{hc}{rows[-2]}"
+            out = ld.cell(rr, 2 + k, f'=IF(COUNT({rng})=0,"Outside ladder range",AVERAGE({rng}))')
+            out.number_format = spec["fmt"]
+            out.border = THIN
+            style_formula(out)
+    ld.cell(rt + 2 + len(LADDER_TARGETS), 1,
+            "'Outside ladder range' = even the largest rung does not reach that fall. scripts/reverse_stress.py solves the "
+            "same question exactly (no interpolation) from the Inputs sheet.").font = MUTED
+
+    # ---- Charts: FULL equity vs shock size, one per event ----
+    for k, (sheet, label, spec, rows) in enumerate(blocks):
+        ch = ScatterChart()
+        ch.title = f"{label}: FULL equity vs shock size"
+        ch.style = 13
+        ch.x_axis.title = f"Shock size ({spec['unit']})"
+        ch.y_axis.title = "Equity ($m)"
+        xs = Reference(ld, min_col=3, min_row=rows[0], max_row=rows[-1])
+        ys = Reference(ld, min_col=4, min_row=rows[0], max_row=rows[-1])
+        ser = Series(ys, xs, title="FULL equity")
+        ser.marker.symbol = "circle"
+        ch.series.append(ser)
+        ch.height = 7
+        ch.width = 13
+        anchor_col = get_column_letter(helper_col0 + len(LADDER_TARGETS) * len(blocks) + 1)
+        ld.add_chart(ch, f"{anchor_col}{LADDER_FIRST_BLOCK + 15 * k}")
+    set_widths(ld, [30, 14, 12, 18, 14, 12, 12, 14, 16, 4, 4] + [10] * 8)
 
 
 if __name__ == "__main__":
