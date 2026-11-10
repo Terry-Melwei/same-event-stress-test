@@ -431,3 +431,25 @@ def test_checker_catches_broken_covenant_and_fx_full(recalculated, tmp_path):
     broken = _recalc(broken, tmp_path / "fx_out")
     rc, out = _check(broken, "apparel_retailer")
     assert rc != 0, out
+
+def test_reverse_stress_label_falls_back_on_unknown_sheet():
+    import reverse_stress
+    assert reverse_stress.event_label("Event_Unknown", None) == "Event_Unknown"
+    assert reverse_stress.event_label("Event_Unknown", "") == "Event_Unknown"
+    assert reverse_stress.event_label("Event_Unknown", "   ") == "Event_Unknown"
+    # A title is used when present; the sheet name is the fallback, never a KeyError.
+    got = reverse_stress.event_label(
+        "Event_FX", "EVENT: Foreign exchange (FX) shock — ONE event (standalone / information / FULL)"
+    )
+    assert "Foreign exchange (FX)" in got
+
+
+def test_reverse_stress_script_covers_fx_and_demand():
+    """The exact-solve script must exit 0 on the apparel example and name both new events."""
+    res = _run("scripts/reverse_stress.py", CASES["apparel_retailer"])
+    out = res.stdout + res.stderr
+    assert res.returncode == 0, out
+    assert "Event_FX" in out
+    assert "Event_Demand" in out
+    assert "Draft, not investment advice" in out
+

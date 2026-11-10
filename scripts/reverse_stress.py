@@ -21,8 +21,22 @@ from openpyxl import load_workbook  # noqa: E402
 import reference_dcf as ref  # noqa: E402
 
 
-LABELS = {"Event_Rates": "Rates (bp)", "Event_Commodity": "Commodity price", "Event_Tariff": "Input cost",
-          "Event_Capex": "Customer capex"}
+def event_label(sheet: str, title: str | None) -> str:
+    """Column header from the event sheet's title cell (A1), or the sheet name.
+
+    Never raises on an unknown Event_ sheet: a missing or blank title falls back
+    to the sheet name.
+    """
+    text = (title or "").strip()
+    if text.upper().startswith("EVENT:"):
+        text = text[6:].strip()
+    for sep in (" — ", " – ", " - "):
+        if sep in text:
+            text = text.split(sep, 1)[0].strip()
+            break
+    if text.lower().endswith(" shock"):
+        text = text[: -len(" shock")].strip()
+    return text or sheet
 
 
 def main(argv=None) -> int:
@@ -37,6 +51,7 @@ def main(argv=None) -> int:
 
     wb = load_workbook(a.workbook, read_only=True)
     sheets = ref.event_sheets(wb.sheetnames)
+    labels = {sh: event_label(sh, wb[sh]["A1"].value if sh in wb.sheetnames else None) for sh in sheets}
     wb.close()
     m = ref.load_inputs_from_workbook(a.workbook)
     base = ref.base_equity_perp(m)
@@ -59,7 +74,8 @@ def main(argv=None) -> int:
         print(json.dumps({"base_equity_perp": base, "events": sheets, "results": rows}, indent=2))
         return 0
     print(f"Base equity (perpetual method): {base:,.2f}")
-    print("| Target change | " + " | ".join(f"{LABELS[s]} shock needed" for s in sheets) + " |")
+    print("Events: " + ", ".join(sheets))
+    print("| Target change | " + " | ".join(f"{s}: {labels[s]} shock needed" for s in sheets) + " |")
     print("|---" * (len(sheets) + 1) + "|")
     for r in rows:
         cells = []
