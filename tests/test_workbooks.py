@@ -29,7 +29,10 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
-from reference_dcf import base_equity_perp, capex_components, format_not_reached, load_inputs_from_workbook  # noqa: E402
+from reference_dcf import (  # noqa: E402
+    base_equity_perp, capex_components, covenant_at, demand_components,
+    format_not_reached, fx_components, load_inputs_from_workbook,
+)
 
 CASES = {
     "default_illustrative": ROOT / "templates" / "stress_template.xlsx",
@@ -37,7 +40,8 @@ CASES = {
     "apparel_retailer": ROOT / "examples" / "workbooks" / "apparel_retailer.xlsx",
     "optical_supplier": ROOT / "examples" / "workbooks" / "optical_supplier.xlsx",
 }
-STANDALONE_ROWS = {"Event_Rates": [6, 8], "Event_Commodity": [6, 7, 8, 9], "Event_Capex": [6, 7, 8]}
+STANDALONE_ROWS = {"Event_Rates": [6, 8], "Event_Commodity": [6, 7, 8, 9], "Event_Capex": [6, 7, 8],
+                   "Event_FX": [6, 7, 8], "Event_Demand": [6, 7, 8, 9]}
 GRID = range(69, 77)
 INTERACTION_LABEL = "Cross-channel interaction (not size non-linearity)"
 THRESHOLD_DEFAULT_FX = '=IF(D66="","",DCF!$B$33*(1-D66))'
@@ -127,7 +131,7 @@ def test_checker_passes_on_shipped(name):
     assert len(warn) == 1, res.stdout
     sheets = _event_sheets(openpyxl.load_workbook(CASES[name], read_only=True))
     for sheet in sheets:
-        assert f"{sheet} (source + basis)" in warn[0]
+        assert f"{sheet} (source + basis + severity)" in warn[0]
 
 
 def _check(path, name, *flags):
@@ -146,6 +150,7 @@ def test_strict_calibration(recalculated, tmp_path):
     for sheet in _event_sheets(wb):
         wb[sheet]["B56"] = "ILLUSTRATIVE test source, 2026-11-10"
         wb[sheet]["B57"] = "ILLUSTRATIVE test basis"
+        wb[sheet]["B58"] = "plausible"
     filled = tmp_path / "filled.xlsx"
     wb.save(filled)
     filled = _recalc(filled, tmp_path / "filled_out")
@@ -345,3 +350,84 @@ def test_ladder_plus_one_matches_mirror(recalculated):
                     assert isinstance(got, str) and got.startswith("Not reached:"), (name, sheet, got)
         wb.close()
         wf.close()
+
+
+@needs_lo
+def test_fx_and_demand_match_independent_reference(recalculated):
+    path = recalculated["apparel_retailer"]
+    wb = openpyxl.load_workbook(path, data_only=True)
+    m = load_inputs_from_workbook(path)
+    fx = fx_components(m)
+    dm = demand_components(m)
+    assert wb["Event_FX"]["D6"].value == pytest.approx(fx["A"], rel=1e-9)
+    assert wb["Event_FX"]["D7"].value == pytest.approx(fx["B"], rel=1e-9)
+    assert wb["Event_FX"]["D8"].value == pytest.approx(fx["C"], rel=1e-9)
+    assert wb["Event_FX"]["D11"].value == pytest.approx(fx["full"], rel=1e-9)
+    assert wb["Event_Demand"]["D6"].value == pytest.approx(dm["A"], rel=1e-9)
+    assert wb["Event_Demand"]["D7"].value == pytest.approx(dm["B"], rel=1e-9)
+    assert wb["Event_Demand"]["D8"].value == pytest.approx(dm["C"], rel=1e-9)
+    assert wb["Event_Demand"]["D9"].value == pytest.approx(dm["D"], rel=1e-9)
+    assert wb["Event_Demand"]["D11"].value == pytest.approx(dm["full"], rel=1e-9)
+    # FX is linear: the mirror of +x equals FULL at -x and the asymmetry is ~0
+    assert wb["Event_FX"]["D62"].value == pytest.approx(fx_components(m, -m.fx_shock)["full"], rel=1e-9)
+    assert wb["Event_FX"]["D63"].value == pytest.approx(0.0, abs=0.05)
+    # Demand is not linear: the revenue product and downside inventory create a non-zero asymmetry
+    assert wb["Event_Demand"]["D62"].value == pytest.approx(demand_components(m, -m.demand_shock)["full"], rel=1e-9)
+    assert abs(wb["Event_Demand"]["D63"].value) > 0.05
+    wb.close()
+
+
+@needs_lo
+def test_covenant_row_matches_reference(recalculated):
+    for name, path in recalculated.items():
+        wb = openpyxl.load_workbook(path, data_only=True)
+        m = load_inputs_from_workbook(path)
+        sheets = _event_sheets(wb)
+        for sheet in sheets:
+            shock = {"Event_Rates": m.rate_shock_bp, "Event_Commodity": m.commodity_shock,
+                     "Event_Tariff": m.tariff_cost_shock, "Event_Capex": m.capex_shock,
+                     "Event_FX": m.fx_shock, "Event_Demand": m.demand_shock}[sheet]
+            conf = covenant_at(m, sheet, shock)
+            mir = covenant_at(m, sheet, -shock)
+            ws = wb[sheet]
+            assert ws["I61"].value == pytest.approx(conf["nd"], rel=1e-6), (name, sheet, "ND")
+            assert ws["J61"].value == pytest.approx(conf["ebitda"], rel=1e-6), (name, sheet, "EBITDA")
+            if conf["ratio"] is None:
+                assert ws["K61"].value == "n/m"
+            else:
+                assert ws["K61"].value == pytest.approx(conf["ratio"], rel=1e-6)
+            assert ws["M61"].value == conf["flag"], (name, sheet, ws["M61"].value, conf)
+            assert ws["M62"].value == mir["flag"], (name, sheet, "mirror flag")
+            # Diagnostic: covenant cells must not be read by FULL
+        # apparel: the 0.35x limit should be tight enough that demand breaches and the base-like rates case passes
+        if name == "apparel_retailer":
+            assert wb["Inputs"]["B52"].value == pytest.approx(0.35)
+            assert wb["Event_Demand"]["M61"].value == "BREACH"
+            assert wb["Event_Rates"]["M61"].value == "PASS"
+            assert "BREACH" in [wb["Summary"][f"M{5 + k}"].value for k in range(len(sheets))]
+        else:
+            assert wb["Event_Rates"]["M61"].value == "n/a"
+        wb.close()
+
+
+@needs_lo
+def test_checker_catches_broken_covenant_and_fx_full(recalculated, tmp_path):
+    path = recalculated["apparel_retailer"]
+    # pasted wrong covenant flag
+    wb = openpyxl.load_workbook(path)
+    wb["Event_Rates"]["M61"] = "zzz"
+    broken = tmp_path / "cov.xlsx"
+    wb.save(broken)
+    wb.close()
+    broken = _recalc(broken, tmp_path / "cov_out")
+    rc, out = _check(broken, "apparel_retailer")
+    assert rc != 0 and "Event_Rates!M61" in out, out
+    # FULL omits FX debt channel
+    wb = openpyxl.load_workbook(path)
+    wb["Event_FX"]["D11"] = "=B39"
+    broken = tmp_path / "fx.xlsx"
+    wb.save(broken)
+    wb.close()
+    broken = _recalc(broken, tmp_path / "fx_out")
+    rc, out = _check(broken, "apparel_retailer")
+    assert rc != 0, out
