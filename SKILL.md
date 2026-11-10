@@ -41,7 +41,7 @@ Each event sheet already shows the shock and its mirror (the same size, opposite
 
 ## Reverse stress test
 
-The reverse-stress grid (wiring rule 11) answers: how big a shock pushes value per share below the threshold in the yellow cell? If nobody has a specific level in mind, use **25% below the base value per share** as the default and say so; the generator already wires this default as a live formula (threshold B66 = base × (1 − drop %), with the drop % in yellow cell D66). Then compare the break-point shock with the calibration source: a break point inside the historically plausible range is a finding to lead with; one far beyond the extreme range is reassurance. For a debt covenant, read net debt ÷ earnings before interest, tax, depreciation and amortisation (EBITDA) at the break-point shock by hand until a covenant row exists.
+The reverse-stress grid (wiring rule 11) answers: how big a shock pushes value per share below the threshold in the yellow cell? If nobody has a specific level in mind, use **25% below the base value per share** as the default and say so; the generator already wires this default as a live formula (threshold B66 = base × (1 − drop %), with the drop % in yellow cell D66). Then compare the break-point shock with the calibration source: a break point inside the historically plausible range is a finding to lead with; one far beyond the extreme range is reassurance. For a debt covenant, read the covenant row (wiring rule 16): net debt ÷ Year-1 earnings before interest, tax, depreciation and amortisation (EBITDA) under the FULL shock and its mirror, versus the limit on Inputs (blank = n/a).
 
 ## Per-shock channel checklists
 
@@ -83,7 +83,16 @@ Channels: revenue units; variable cost; royalties/tax on volume; working capital
 
 ### Foreign exchange (FX)
 
-Channels: sales translation; local-currency cost translation; foreign-currency debt translation in the net-debt bridge; any FX hedges treated once.
+Shock example: home-currency appreciation ±10% (positive = the home currency strengthens). Config: foreign-currency revenue share, foreign-currency cost share (the natural hedge), foreign-currency debt share, and a yellow financial hedge ratio (share of foreign revenue hedged). Depreciation and amortisation (D&A) and capital expenditure (capex) stay at base dollars. Cash is not remeasured. **This event is linear in the shock by construction** (every channel scales in proportion to the shock), so the up and down cases mirror; do not claim FX non-linearity from this workbook.
+
+| Row | Kind | Channel | What moves |
+|-----|------|---------|------------|
+| A | standalone | Translation of foreign revenue | Foreign-currency revenue is restated; opex and the hedge stay at base |
+| B | standalone | Foreign-currency cost offset (natural hedge) + financial hedge | Foreign-currency opex offsets the translation; the yellow hedge ratio covers a share of foreign revenue, counted once with this channel, not also on the debt |
+| C | standalone | Foreign-currency debt remeasurement | Remeasured once in the **net-debt bridge**, not inside free cash flow to the firm (FCFF). When the home currency strengthens, foreign-currency debt falls in home-currency terms |
+| D | information | Operating A+B before debt remeasurement | Communication only; **outside FULL** |
+| E | information | Cash remeasurement (not modelled) | Communication only; **outside FULL**; cash stays at the Inputs cash balance |
+| FULL | cumulative | A+B+C | Operating path plus debt remeasurement once; D/E excluded |
 
 ### Jurisdiction / regulatory
 
@@ -95,7 +104,18 @@ Build an explicit **units × price × unit cost** bridge. Keep fixed occupancy s
 
 ### Consumer demand / comps
 
-Channels: comparable-store or volume; price/mix; markdowns; inventory; store / capacity opex; net debt.
+Shock example: volume −15% (enter the adverse direction, typically a fall). Config: volume shock, a yellow price/mix elasticity (price %Δ per volume %Δ), a yellow fixed-cost share of opex (which includes D&A), and a yellow inventory-to-sales ratio. D&A and capex stay at base dollars (capacity is held). Standard Δ net working capital (NWC) already follows stressed revenue in the operating path and is shown as an information row, not double-counted.
+
+| Row | Kind | Channel | What moves |
+|-----|------|---------|------------|
+| A | standalone | Volume | Revenue × (1 + volume); opex held at base |
+| B | standalone | Price / mix elasticity | Price %Δ = elasticity × volume, at base volume and costs |
+| C | standalone | Operating leverage on fixed costs | The yellow fixed-cost share of opex does not move; the rest is variable. Revenue is held at base in this standalone row |
+| D | standalone | Inventory / working-capital effect | Year-1 cash use = inventory-to-sales × max(0, −volume) × Year-1 base revenue, **inside FCFF**, not a t0 net-debt restatement. Zero when volume rises |
+| E | information | Standard ΔNWC follows stressed revenue | Already inside A/B/FULL; **outside FULL** as a row |
+| FULL | cumulative | A+B+C+D | FULL revenue = base × (1 + volume) × (1 + elasticity × volume); leveraged opex; inventory overlay. E excluded |
+
+**Honest limit on non-linearity.** The revenue product (1+v)×(1+εv) and the downside-only inventory cash use make the mirror asymmetric when those inputs are not zero. Fixed-cost operating leverage on its own changes the slope of dollar FCFF, not the curvature: with the elasticity at zero and no inventory overlay, dollar FCFF is linear in the volume shock and the mirror is symmetric. Do not claim that fixed-cost leverage alone makes this event non-linear, and do not claim commodity or FX non-linearity from this workbook.
 
 ### Capex cycle (customer or own)
 
@@ -141,10 +161,11 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 9. **Interaction row.** Row 12 on each event sheet, labelled **Cross-channel interaction (not size non-linearity)** (INT, kind diagnostic), = (FULL − base) − Σ(standalone row − base), in $m and $/sh. Never sum information or diagnostic rows into it, never feed it into FULL or the blend, and never paste it. Where the channel rows are a sequential ladder (the tariff sheet), the increments already sum to the last step, so INT isolates the cross-effect of the remaining separable channel (sourcing mitigation). INT = 0 means the channels add up at that one shock size; it does **not** mean the value response is linear in shock size (see *Reading the result* above, the mirror / asymmetry rows 61–63 and the Ladder sheet). In the template the commodity and rates channels are additive by construction, so their INT is 0 and that is correct.
 10. **Both directions.** Show FULL at the configured shock and at the mirrored shock (same size, opposite sign) with an asymmetry line = (configured − base) + (mirrored − base).
 11. **Reverse stress test.** An 8-step formula grid of ascending shock multiples (blue inputs) in the configured direction, and a result cell that reports the smallest tested shock whose FULL proxy $/sh falls below a yellow threshold. The threshold (B66) defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (D66, default 25%); typing a $/sh level over B66 (or `threshold_value_per_share` in the config) overrides it. Blank drop % or blank threshold → `n/a`. If no tested shock breaks the threshold, the cell reads `Not reached: worst is −X% at …` (the worst fall and shock on the grid). No goal seek, no macros, no pasted answers.
-12. **Calibration rule.** Every shock size has a yellow **source** cell (data set or document, with date) and a yellow **basis** cell (for example a historical 1-year 95th percentile move). Ship them as `TO FILL: source` / `TO FILL: basis`; never invent a statistic. A real-issuer workbook cannot be CLEAR while either says TO FILL. The checker prints a WARNING listing every event still TO FILL; run it with `--strict-calibration` for a real-issuer CLEAR so TO FILL becomes FAIL. An empty cell always FAILs.
+12. **Calibration rule.** Every shock size has a yellow **source** cell (data set or document, with date), a yellow **basis** cell (for example a historical 1-year 95th percentile move) and a yellow **severity** cell (plausible, severe or extreme). Ship them as `TO FILL: source` / `TO FILL: basis` / `TO FILL: severity`; never invent a statistic. A real-issuer workbook cannot be CLEAR while any of them says TO FILL. The checker prints a WARNING listing every event still TO FILL; run it with `--strict-calibration` for a real-issuer CLEAR so TO FILL becomes FAIL. An empty cell always FAILs.
 13. **Enter shocks in their adverse direction.** The grid and the default checker tests treat the configured sign as the adverse case; flip the input to test the other side.
-14. **Summary sheet.** Right after the Cover, rank every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas (no SORT, no macros), showing down-case / up-case $/sh, %Δ, interaction, asymmetry and the reverse-stress result.
+14. **Summary sheet.** Right after the Cover, rank every enabled event by absolute FULL change in $/sh with LARGE + INDEX/MATCH formulas (no SORT, no macros), showing down-case / up-case $/sh, %Δ, interaction, asymmetry, the reverse-stress result and the covenant ratio / flag at the configured and mirrored shocks.
 15. **Shock ladder.** A Ladder sheet re-runs every event's FULL at yellow multiples of its configured shock (default −1.5×, −1×, −0.5×, 0, +0.5×, +1×, +1.5×; ascending and symmetric) through helper rows on the event sheet itself, so it uses the same construction as FULL. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a live check cell. A reverse stress test there interpolates the shock that cuts FULL equity by yellow % targets; `scripts/reverse_stress.py` solves the same question exactly. Each event gets a chart of FULL equity against shock size.
+16. **Covenant row.** Next to the mirror rows (columns I–M, with a note on row 64), and also on the Summary, show net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. This is a diagnostic, **outside FULL and the blend**. EBITDA = EBIT + D&A, matching the model's existing definition (opex already includes D&A, which is added back so it is not subtracted twice; the same add-back is used for Year-5 EBITDA on the DCF sheet). A non-positive EBITDA, or a ratio above the limit, is BREACH. The demand-sheet inventory overlay sits inside FCFF and does not restate t0 net debt.
 
 ## Colour and labelling conventions
 
@@ -191,7 +212,7 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 
 - Template workbook: [templates/stress_template.xlsx](templates/stress_template.xlsx)
 - Generator / checker: [scripts/generate.py](scripts/generate.py), [scripts/check_workbook.py](scripts/check_workbook.py)
-- Example configs: [examples/configs/](examples/configs/) (rates + commodity, rates + tariff, and rates + tariff + capex cycle in `optical_supplier.yaml`)
+- Example configs: [examples/configs/](examples/configs/) (rates + commodity; rates + tariff + foreign exchange + consumer demand in `apparel_retailer.yaml`; rates + tariff + capex cycle in `optical_supplier.yaml`)
 - Worked prose examples: [examples/README.md](examples/README.md)
 - Review gate: [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md)
 - Package overview and how to load this skill into agents: [README.md](README.md)

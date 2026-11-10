@@ -2,7 +2,7 @@
 
 **Draft, not investment advice.** All three cases below use invented names and round ILLUSTRATIVE numbers. They are teaching walkthroughs of which shocks to run and which channels each shock moves. They are not valuations of any real issuer.
 
-Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = cross-channel interaction row (not size non-linearity). WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together.
+Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = cross-channel interaction row (not size non-linearity). WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together. EBITDA = earnings before interest, tax, depreciation and amortisation (in this model, EBIT + D&A). EBIT = earnings before interest and tax. D&A = depreciation and amortisation. $/sh = US dollars per diluted share.
 
 ---
 
@@ -36,33 +36,40 @@ Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present val
 
 ## Case 2 — Illustrative specialty apparel retailer (“Harbor Lane Apparel”, ILLUSTRATIVE)
 
-**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC 10%; terminal growth 2.5%; exit multiple 9× EBITDA.
+**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC about 8% (no override); terminal growth 2.5%; exit multiple 9× EBITDA. Config: [configs/apparel_retailer.yaml](configs/apparel_retailer.yaml). The workbook also has a blue net debt / Year-1 EBITDA covenant limit of 0.35× (ILLUSTRATIVE).
 
 **Shocks run (each in its own table):**
 
-1. **Tariffs / input costs (+15% unit product cost, with partial pass-through)**
+1. **Interest rates ±100 bp** (lighter retail debt book)
+   - Channels A–E as in the miner case, but refinancing and mark-to-market channels are small.
+
+2. **Tariffs / input costs (+15% unit product cost, with partial pass-through)**
    - Explicit **units × price × unit cost** bridge; fixed occupancy kept on a separate line.
    - **A — Unit cost:** landed cost +15%.
    - **B — Price pass-through:** management recovery 60% of the unit-cost hit in shelf price — counted **once** (no second add-back in margin).
-   - **C — Demand elasticity / markdowns:** volume −3% from higher shelf prices; markdown rate +1 percentage point.
-   - **D — Inventory / working capital:** inventory days +5 on the transition.
-   - **E — Sourcing mitigation:** 25% of volume shifted to an alternate country over two years (partial offset).
+   - **C — Demand elasticity / markdowns:** volume response and markdowns as in the config.
+   - **D — Inventory / working capital** and **E — Sourcing mitigation** complete the bridge.
    - **FULL:** all of A–E. Pass-through invariant checked: at 100% recovery and zero elasticity/markdowns/mitigation, gross-profit dollars unchanged.
 
-2. **Consumer demand / comps (−5% comparable sales)**
-   - **A — Volume / comps:** −5% transactions.
-   - **B — Price / mix:** mix shift toward promotional tiers (−50 bp margin).
-   - **C — Markdowns:** +150 bp of sales.
-   - **D — Inventory:** clearance raises short-term cash then normalises.
-   - **E — Store opex:** fixed occupancy largely unchanged (highlighting operating leverage).
-   - **FULL:** combined demand table; not stacked with the tariff table.
+3. **Foreign exchange (FX), home-currency appreciation +10%** (enabled in this workbook)
+   - **A — Translation of foreign revenue** (foreign-currency revenue share 40%).
+   - **B — Foreign-currency cost offset (natural hedge, 15% of opex) + financial hedge** (yellow hedge ratio 25% of foreign revenue), counted once.
+   - **C — Foreign-currency debt remeasurement** (30% of gross debt) once in the net-debt bridge, not inside FCFF.
+   - **FULL:** A+B+C. This event is linear in the shock by construction, so the +10% and −10% cases mirror; do not claim FX non-linearity. Cash is not remeasured.
+   - Illustrative order of magnitude in the shipped workbook (teaching scale only, not a forecast): FULL at +10% home-currency appreciation is about −7% on the blended-mid proxy; the covenant ratio stays below the 0.35× limit (PASS).
 
-3. **Interest rates ±100 bp** (lighter retail debt book)
-   - Channels A–E as in the miner case, but refinancing and mark-to-market channels are small; buyback capacity matters more because the base plan included modest buybacks.
+4. **Consumer demand / volume −15%** (enabled in this workbook)
+   - **A — Volume** on revenue only (opex at base).
+   - **B — Price / mix elasticity** (yellow, 0.20).
+   - **C — Operating leverage** (yellow fixed-cost share of opex 40%).
+   - **D — Year-1 inventory cash use** that applies only when volume falls (inside FCFF, not a t0 net-debt restatement).
+   - **FULL:** revenue = base × (1 + volume) × (1 + elasticity × volume), leveraged opex, inventory overlay. Not stacked with the tariff or FX tables.
+   - Honest limit: fixed-cost leverage alone does not make dollar FCFF non-linear in volume; the shipped workbook's mirror asymmetry comes from the revenue product and the downside-only inventory cash use.
+   - Illustrative order of magnitude in the shipped workbook (teaching scale only): FULL at −15% volume is about −41% on the blended-mid proxy, and Year-1 net debt / EBITDA rises above the 0.35× limit (BREACH). The +15% mirror does not have the inventory cash use.
 
-4. **Capex cycle (optional, not built in the apparel workbook):** mall remodel wave — own revenue lift from refreshed stores, own capex spike, FCFF trough, and a temporary shift toward debt funding in the bridge (equity vs debt mix). Own-base %Δ only. Case 3 shows the generated `Event_Capex` sheet.
+5. **Capex cycle (optional, not built in the apparel workbook):** mall remodel wave — own revenue lift from refreshed stores, own capex spike, FCFF trough, and a temporary shift toward debt funding in the bridge (equity vs debt mix). Own-base %Δ only. Case 3 shows the generated `Event_Capex` sheet.
 
-**Checks emphasised.** No double-counted tariff recovery; labels’ years matched the first affected forecast column; EV for any peer comps recomputed as market cap + debt − cash rather than a vendor EV field.
+**Checks emphasised.** No double-counted tariff recovery; FX financing counted once in the bridge; demand inventory overlay inside FCFF only; covenant flags recomputed independently; labels’ years matched the first affected forecast column; EV for any peer comps recomputed as market cap + debt − cash rather than a vendor EV field. Every shock-size calibration cell ships as `TO FILL`.
 
 ---
 
