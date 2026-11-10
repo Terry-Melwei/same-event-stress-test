@@ -1,6 +1,6 @@
 ---
 name: same-event-stress-test
-description: Use when building or reviewing a same-event multi-channel valuation stress test (one shock, every transmission channel, FULL row, tornado/envelope/football field) for a DCF or similar model.
+description: Use when stress-testing a stock's valuation against one market shock at a time (interest rates, commodity prices, tariffs, foreign exchange, demand, regulation), or when building or reviewing a same-event multi-channel stress test (every transmission channel, FULL row, tornado, envelope and football-field charts) for a discounted cash flow (DCF) or similar model. Also use for "what happens to the share price if rates rise 100bp", "how exposed is this stock to copper", "is the downside bigger than the upside", or "how big a shock would cut value by a quarter".
 ---
 
 # Same-event multi-channel stress test
@@ -21,6 +21,26 @@ Do **not** use this skill to stack multiple unrelated events in one table, to pa
 ## Method in one paragraph
 
 A **same-event multi-channel stress test** takes a single shock (for example rates +100 basis points, or commodity price −20%) and builds **one table for that shock**. Rows A, B, C… each isolate one transmission channel. The **FULL** row applies every channel of that same event together. Never put two different events in the same table. Measure each FULL percentage change (%Δ) against **that method’s own base**, apply the %Δ to the blended midpoint, and label the result a **blended-mid sensitivity proxy**. Wire tornado, envelope, and football-field ranges to the FULL rows with live Excel formulas. Under every table, show what the channel rows cannot: an **interaction** row (FULL minus the sum of the standalone rows), the same event **mirrored** (opposite sign) so the asymmetry is visible, a **reverse stress** grid, and the **calibration source** of the shock size.
+
+## Choosing the shock size
+
+A stress test is only as useful as its shock is plausible. Before building a table, write down **why** this size:
+
+- **Anchor to history.** Prefer a move the market has actually made, such as the largest 12-month change in the last 10 to 20 years, a named past episode, or a one-in-ten-year move from the series' own volatility. Put the source and window in the yellow calibration source cell.
+- **Say how severe it is.** Label each shock *plausible* (seen several times in the window), *severe* (seen once) or *extreme* (beyond the window). Don't present an extreme shock as a base case.
+- **Match the horizon.** The valuation assumes the shock persists through the forecast. If history says the move usually reverses within a year, say so next to the result, because a persistent-shock valuation will overstate the damage.
+
+## Reading the result: asymmetry and non-linearity
+
+Each event sheet already shows the shock and its mirror (the same size, opposite sign). In any write-up:
+
+- **Lead with the downside / upside ratio** = |change in value per share from the adverse case| ÷ |change from the favourable case|. A ratio well above 1 means the stock loses more than it gains from the same-sized move.
+- **Name the channel behind it:** operating leverage on fixed costs, a royalty or tax step, debt that amplifies equity moves, or a dominant terminal value.
+- **Don't read a zero interaction row as "linear".** The interaction row measures how channels *combine* at one shock size. A shock can still hurt more than proportionally as it grows, for example through the convexity of value in the weighted average cost of capital (WACC). Use the mirror and, where built, a multi-size shock ladder to see that curve.
+
+## Reverse stress test
+
+The reverse-stress grid (wiring rule 11) answers: how big a shock pushes value per share below the threshold in the yellow cell? If nobody has a specific level in mind, use **25% below the base value per share** as the default and say so. Then compare the break-point shock with the calibration source: a break point inside the historically plausible range is a finding to lead with; one far beyond the extreme range is reassurance. For a debt covenant, read net debt ÷ earnings before interest, tax, depreciation and amortisation (EBITDA) at the break-point shock by hand until a covenant row exists.
 
 ## Per-shock channel checklists
 
@@ -144,7 +164,8 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 3. **Wire** tornado, envelope, football field (tables + charts) and the Summary sheet to the FULL rows; label blended-mid sensitivity proxies.
 4. **Recalculate** (LibreOffice or Excel). Regeneration leaves formula caches empty until recalc.
 5. **Run** `python scripts/check_workbook.py <out.xlsx> --config <case.yaml>` (live tests, pasted-output scan, pass-through invariant, independent FULL / mirror / grid recompute, interaction, reverse-stress and Summary checks), then every Blocking item in [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md).
-6. **Write a pass/fail verdict** using the checklist’s verdict template (`CLEAR` or `BLOCK` with numbered cell-cited fixes). CLEAR means the workbook is built correctly; it does not endorse the assumptions.
+6. **Report both directions** and the downside / upside ratio, name the channel behind any asymmetry, and state the shock's historical anchor and severity label.
+7. **Write a pass/fail verdict** using the checklist’s verdict template (`CLEAR` or `BLOCK` with numbered cell-cited fixes). CLEAR means the workbook is built correctly; it does not endorse the assumptions.
 
 ## Pitfalls (from real reviews) and fixes
 
@@ -160,6 +181,8 @@ Share count changes **once**, alongside the matching cash in the bridge. Always 
 | Capex funding counted in FCFF **and** again as new debt in the bridge | Debt-funded part adds debt and cash equally; only the equity part moves net debt, paired with new diluted shares |
 | A "shock size" with no source | Yellow calibration source + basis cells; `TO FILL` until sourced |
 | Interaction row typed in, or summing information rows | Live formula over standalone rows only; checker recomputes it |
+| One-directional shock reported as "the" sensitivity | Run adverse and favourable sizes; report both and the downside / upside ratio |
+| Shock size picked without justification | Anchor to a cited historical move and label it plausible, severe or extreme |
 
 ## Package pointers
 
