@@ -1,8 +1,8 @@
 # Worked examples (illustrative only)
 
-**Draft, not investment advice.** Both cases below use invented names and round ILLUSTRATIVE numbers. They are teaching walkthroughs of which shocks to run and which channels each shock moves. They are not valuations of any real issuer.
+**Draft, not investment advice.** All three cases below use invented names and round ILLUSTRATIVE numbers. They are teaching walkthroughs of which shocks to run and which channels each shock moves. They are not valuations of any real issuer.
 
-Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together.
+Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present value. INT = interaction row. WACC = weighted average cost of capital. FCFF = free cash flow to the firm. EV = enterprise value. EPS = earnings per share. FX = foreign exchange. bp = basis points. FULL = all channels of one event applied together.
 
 ---
 
@@ -60,15 +60,35 @@ Terms: DCF = discounted cash flow. WACC = weighted average cost of capital. FCFF
 3. **Interest rates ±100 bp** (lighter retail debt book)
    - Channels A–E as in the miner case, but refinancing and mark-to-market channels are small; buyback capacity matters more because the base plan included modest buybacks.
 
-4. **Capex cycle (optional):** mall remodel wave — own revenue lift from refreshed stores, own capex spike, FCFF trough, and a temporary shift toward debt funding in the bridge (equity vs debt mix). Own-base %Δ only.
+4. **Capex cycle (optional, not built in the apparel workbook):** mall remodel wave — own revenue lift from refreshed stores, own capex spike, FCFF trough, and a temporary shift toward debt funding in the bridge (equity vs debt mix). Own-base %Δ only. Case 3 shows the generated `Event_Capex` sheet.
 
 **Checks emphasised.** No double-counted tariff recovery; labels’ years matched the first affected forecast column; EV for any peer comps recomputed as market cap + debt − cash rather than a vendor EV field.
 
 ---
 
+## Case 3 — Illustrative optical-components supplier (“Lumen Bay Photonics”, ILLUSTRATIVE)
+
+**Setup (illustrative).** Revenue $1,500 million growing 8%; operating costs 82% of revenue; capex 10% of revenue; net debt $350 million; diluted shares 100 million; beta 1.3; terminal growth 3%; exit multiple 12× EBITDA. Config: [configs/optical_supplier.yaml](configs/optical_supplier.yaml).
+
+**Shocks run (each in its own table):**
+
+1. **Interest rates ±100 bp** — as in Case 1.
+2. **Component tariff +15%** — units × price × unit cost bridge with 50% pass-through, −0.2 demand elasticity and 20% sourcing mitigation. The INT row is non-zero here: mitigation shrinks the shock that pass-through and elasticity respond to.
+3. **Customer capex +30%** (for example a data-centre build-out), entered as the adverse case:
+   - **A — Own revenue:** +0.6 × 30% = +18% (yellow elasticity); opex, royalty and net working capital follow revenue.
+   - **B — Own capex:** +1.2 × 30% = +36% (yellow response) — the FCFF channel.
+   - **C — Financing mix:** the PV of the extra capex is raised once: 50% equity at a yellow $18.00 issue price (below value, so dilutive) lowers net debt and adds diluted shares in the same step; 50% debt adds debt and cash equally.
+   - **D / E — information:** operating-only FCFF view and an all-equity funding view, both outside FULL.
+   - **FULL:** A+B+C per pre-event diluted share. The mirror (customer capex −30%) needs no financing, so the two directions are not symmetric.
+   - **Reverse stress:** an ILLUSTRATIVE $25.00 threshold is set on this sheet; the grid reports the smallest tested capex shock that takes the FULL proxy below it.
+
+Every shock-size calibration cell ships as `TO FILL`. No number in this case is sourced from a real company or vendor.
+
+---
+
 ## How to use these examples with the template
 
-Generate with `python scripts/generate.py --config examples/configs/gold_miner.yaml` (or `apparel_retailer.yaml`), recalculate, and run `python scripts/check_workbook.py`. Or copy [templates/stress_template.xlsx](../templates/stress_template.xlsx). Gate with [REVIEW_CHECKLIST.md](../REVIEW_CHECKLIST.md) and write a CLEAR or BLOCK verdict.
+Generate with `python scripts/generate.py --config examples/configs/gold_miner.yaml` (or `apparel_retailer.yaml`, `optical_supplier.yaml`), recalculate, and run `python scripts/check_workbook.py`. Or copy [templates/stress_template.xlsx](../templates/stress_template.xlsx). Gate with [REVIEW_CHECKLIST.md](../REVIEW_CHECKLIST.md) and write a CLEAR or BLOCK verdict.
 
 
-Shipped recalculated workbooks: [workbooks/gold_miner.xlsx](workbooks/gold_miner.xlsx), [workbooks/apparel_retailer.xlsx](workbooks/apparel_retailer.xlsx).
+Shipped recalculated workbooks: [workbooks/gold_miner.xlsx](workbooks/gold_miner.xlsx), [workbooks/apparel_retailer.xlsx](workbooks/apparel_retailer.xlsx), [workbooks/optical_supplier.xlsx](workbooks/optical_supplier.xlsx).

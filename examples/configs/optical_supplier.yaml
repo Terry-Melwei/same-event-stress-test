@@ -1,0 +1,79 @@
+# ILLUSTRATIVE optical-components supplier — invented issuer, not a real company.
+# Teaches the capex-cycle event: a customer (for example data-centre) capex shock moves own revenue,
+# own capex and the equity-versus-debt financing mix together, in ONE table with a FULL row.
+meta:
+  title: "Lumen Bay Photonics — ILLUSTRATIVE same-event stress test"
+  company_label: "Lumen Bay Photonics (ILLUSTRATIVE)"
+  notes: "Draft, not investment advice. Invented numbers. Second event is a component tariff; third event is a customer capex cycle."
+
+inputs:
+  revenue_y0: 1500.0
+  revenue_growth: 0.08
+  opex_pct_of_revenue: 0.82     # includes depreciation and amortisation (D&A) in this template
+  tax_rate: 0.21
+  da_pct_of_revenue: 0.06
+  capex_pct_of_revenue: 0.10
+  nwc_pct_of_delta_revenue: 0.15
+  royalty_rate: 0.00
+  commodity_price_index: 100.0  # unused here (commodity event disabled); schema requires it
+  commodity_shock: -0.20
+  risk_free_rate: 0.04
+  equity_risk_premium: 0.05
+  beta: 1.3
+  pre_tax_cost_of_debt: 0.06
+  debt_weight: 0.15
+  equity_weight: 0.85
+  rate_shock_bp: 100
+  wacc_override: null
+  terminal_growth: 0.03
+  exit_ebitda_multiple: 12.0
+  gross_debt: 600.0
+  cash: 250.0
+  floating_debt_share: 0.50
+  fixed_debt_duration_years: 4.0
+  diluted_shares_million: 100.0
+  base_buyback_cash: 0.0
+  cost_elasticity: 0.0
+  capex_price_elasticity: 0.0
+
+events:
+  rates:
+    enabled: true
+    label: "Interest rates ±100 bp"
+  commodity:
+    enabled: false
+    label: "Commodity (disabled)"
+  tariff:
+    enabled: true
+    label: "Component tariff +15% FULL"
+  capex:
+    enabled: true
+    label: "Customer capex +30% FULL"
+    customer_capex_shock_pct: 0.30           # boom entered as the adverse case: capacity build + dilution
+    revenue_elasticity_to_customer_capex: 0.60
+    own_capex_response: 1.20
+    equity_funding_share: 0.50
+    issue_price_per_share: 18.00             # judgment: issued below value per share (dilutive)
+    threshold_value_per_share: 25.00         # ILLUSTRATIVE reverse-stress threshold ($/sh); omit to disable (n/a)
+
+tariff:
+  units: 30.0                 # 30 × $50 ≈ $1,500m revenue year-0
+  price: 50.0
+  unit_cost: 15.0
+  fixed_cost: 200.0
+  cost_shock_pct: 0.15
+  pass_through_pct: 0.50
+  elasticity: -0.20
+  markdown_pct: 0.0
+  mitigation_pct: 0.20
+
+passthrough:
+  units: 3000.0
+  price: 50.0
+  unit_cost: 15.0
+  fixed_cost: 20000.0
+  cost_shock_pct: 0.15
+  pass_through_pct: 1.0
+  elasticity: 0.0
+  markdown_pct: 0.0
+  mitigation_pct: 0.0

@@ -6,23 +6,38 @@
 
 **Markets don't send warnings.** A central bank surprises by 100 basis points (bp, hundredths of a percentage point). Copper drops 20% in a month. A tariff lands overnight. The question isn't whether a shock will come; it's what that shock does to the value of the stock you own, and whether you will see it coming in your own model before the market shows you.
 
-This skill answers that question one shock at a time. Pick a single event, such as interest rates ±100 bp or a commodity price ±20%, and the workbook traces **every channel that same event pushes through**: revenue, margins, the discount rate, the debt load. Each one is a row (A, B, C…), and a **FULL** row adds them up into one number for equity value.
+This skill answers that question one shock at a time. Pick a single event, such as interest rates ±100 bp, a commodity price ±20% or a customer capital-expenditure (capex) boom, and the workbook traces **every channel that same event pushes through**: revenue, margins, the discount rate, the debt load, the share count. Each one is a row (A, B, C…), and a **FULL** row adds them up into one number for equity value.
 
 What you get from it:
 
-- **The hidden asymmetry.** Shocks rarely cut both ways equally. A +20% move and a −20% move can change value by very different amounts, and the tornado and envelope views show where the pain is non-linear, so a "small" shock that does outsized damage is easy to spot.
+- **The hidden asymmetry.** Shocks rarely cut both ways equally. Every event is run in both directions, side by side, with an asymmetry line, and an interaction row shows how much the channels amplify (or cancel) each other beyond their simple sum. A "small" shock that does outsized damage is easy to spot.
 - **The channel that really matters.** Instead of one blended sensitivity number, you see which channel drives the move, so you know what to watch and what to hedge.
-- **A plan before the headline.** Run the shocks you fear in advance, see the downside range on a football-field chart, and decide your response while it is still a calm decision.
+- **The shock that breaks you.** Name the value per share you cannot live with, and a reverse stress grid tells you how big the shock has to be to get there.
+- **A plan before the headline.** Run the shocks you fear in advance, see them ranked on one Summary page and the downside range on a football-field chart, and decide your response while it is still a calm decision.
 
-Under the hood, the method is built to be checked, not trusted. Free cash flow to the firm (FCFF) stays operating-only, and financing enters once, in the net-debt bridge or through the weighted average cost of capital (WACC), so nothing is double-counted. Interest and buyback capacity on the rates sheet are shown as information rows outside FULL. The tornado, envelope and football-field charts are all formula-linked to the FULL rows, and a bundled checker independently rebuilds every stress total. Reviewers gate finished workbooks with [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md).
+Under the hood, the method is built to be checked, not trusted. Free cash flow to the firm (FCFF) stays operating-only, and financing enters once, in the net-debt bridge or through the weighted average cost of capital (WACC), so nothing is double-counted. Interest and buyback capacity on the rates sheet are shown as information rows outside FULL; new shares issued to fund a capex boom change the share count and net debt together, once. Every shock size carries a calibration source cell that stays `TO FILL` until someone cites real data. The tornado, envelope, football-field and Summary views are all formula-linked to the FULL rows, and a bundled checker independently rebuilds every stress total, every mirrored shock and every reverse-stress grid step. Reviewers gate finished workbooks with [REVIEW_CHECKLIST.md](REVIEW_CHECKLIST.md).
 
 Audience: equity and credit analysts, and people who run AI agents and want to hand the agent this method.
+
+## Features
+
+| Feature | Where | Notes |
+|---------|-------|-------|
+| One event per table, channel rows + FULL | `Event_Rates`, `Event_Commodity` or `Event_Tariff`, optional `Event_Capex` (rows 6–11) | Information / diagnostic rows stay outside FULL |
+| Capex-cycle event | `Event_Capex` | Own revenue, own capex, equity vs debt financing mix (net debt and diluted shares change once, paired) |
+| Interaction (nonlinearity) row | Row 12 on every event sheet | FULL − Σ standalone rows, in $m and US dollars per share ($/sh); diagnostic, outside FULL and the blend |
+| Up / down mirror | Rows 60–63 | Same event at the opposite sign, plus an asymmetry line |
+| Reverse stress test | Rows 65–76 (helpers 80–88) | 8-step formula grid; yellow threshold; result = smallest tested shock below it, `n/a` when blank |
+| Shock calibration disclosure | Rows 54–57 | Yellow source + basis cells, shipped as `TO FILL` |
+| Summary ranking | `Summary` (right after Cover) | Events ranked by absolute FULL change in $/sh with LARGE + INDEX/MATCH |
+| Tornado / envelope / football field | `Tornado`, `Envelope`, `Football` | Formula-linked to FULL rows; envelope MIN/MAX covers every enabled event |
+| Checker | `scripts/check_workbook.py` | Live-input, shock and channel tests; independent recompute; pasted-output scan; regression mutations |
 
 ## Supported environment
 
 | Tool | Supported | Tested |
 |------|-----------|--------|
-| Python | >=3.11,<3.14 | 3.13.5 |
+| Python | >=3.11,<3.14 | 3.11.18, 3.13.5 |
 | LibreOffice | >=24 (headless `soffice`) | 25.2.3.2 |
 | Packages | see [requirements.txt](requirements.txt) (pinned) | openpyxl 3.1.5, PyYAML 6.0.3, jsonschema 4.26.0 |
 
@@ -39,6 +54,8 @@ stress-test-skill/
 ├── .gitignore
 ├── schemas/
 │   └── config.schema.json
+├── tests/
+│   └── test_workbooks.py     # pytest: formula match, checker PASS, interaction, reverse stress, Summary
 ├── scripts/
 │   ├── generate.py           # YAML → workbook
 │   ├── check_workbook.py     # recalc + live tests + pass-through + FULL reconciliation
@@ -51,10 +68,12 @@ stress-test-skill/
 │   ├── configs/
 │   │   ├── default_illustrative.yaml
 │   │   ├── gold_miner.yaml
-│   │   └── apparel_retailer.yaml
+│   │   ├── apparel_retailer.yaml
+│   │   └── optical_supplier.yaml    # rates + tariff + capex cycle
 │   └── workbooks/               # shipped WITH formula caches
 │       ├── gold_miner.xlsx
-│       └── apparel_retailer.xlsx
+│       ├── apparel_retailer.xlsx
+│       └── optical_supplier.xlsx
 └── build/                       # local generate/recalc outputs (see commands)
     └── recalculated/
 ```
@@ -101,6 +120,18 @@ soffice --headless --calc --convert-to xlsx --outdir build/recalculated build/lo
 cp build/recalculated/apparel_retailer.xlsx examples/workbooks/apparel_retailer.xlsx
 python scripts/check_workbook.py examples/workbooks/apparel_retailer.xlsx \
   --config examples/configs/apparel_retailer.yaml
+
+# Optical supplier example (rates + component tariff + customer capex cycle)
+python scripts/generate.py --config examples/configs/optical_supplier.yaml --out build/generated/optical_supplier.xlsx
+cp build/generated/optical_supplier.xlsx build/lo_in/optical_supplier.xlsx
+soffice --headless --calc --convert-to xlsx --outdir build/recalculated build/lo_in/optical_supplier.xlsx
+cp build/recalculated/optical_supplier.xlsx examples/workbooks/optical_supplier.xlsx
+python scripts/check_workbook.py examples/workbooks/optical_supplier.xlsx \
+  --config examples/configs/optical_supplier.yaml --regression
+
+# Tests (LibreOffice-dependent tests are skipped when soffice is missing)
+python -m pip install pytest
+python -m pytest -v
 ```
 
 **Important:** `generate.py` writes live formulas only. Formula caches stay empty until you recalculate into a **separate** outdir (LibreOffice errors if asked to overwrite the source path). `check_workbook.py` **FAILS** when the input file has empty caches (for example `DCF!B30 is None`). Always check the recalculated artifact.
@@ -139,11 +170,15 @@ Per [Cursor Agent Skills docs](https://cursor.com/docs/skills), Cursor auto-disc
 
 ## Template contents
 
-[templates/stress_template.xlsx](templates/stress_template.xlsx) (shipped with caches) includes: Cover, Inputs, a five-year discounted cash flow (DCF), Event_Rates, Event_Commodity (or Event_Tariff in the apparel example), Tornado (table + bar chart), Envelope, Football (table + floating-bar chart), PassThrough (units × price × unit cost invariant), and How_Measured. Blue font = inputs; black = formulas; yellow fill + blue font = judgment.
+[templates/stress_template.xlsx](templates/stress_template.xlsx) (shipped with caches) includes: Cover, Summary (events ranked by absolute FULL change in $/sh), Inputs, a five-year discounted cash flow (DCF), Event_Rates, Event_Commodity (or Event_Tariff in the apparel example; plus Event_Capex in the optical example), Tornado (table + bar chart), Envelope, Football (table + floating-bar chart), PassThrough (units × price × unit cost invariant), and How_Measured. Every event sheet also carries the interaction row, the up/down mirror, the reverse stress grid and the calibration cells. Blue font = inputs; black = formulas; yellow fill + blue font = judgment.
+
+To switch on the capex-cycle event in your own config, add `events.capex` with `enabled: true` and its inputs (`customer_capex_shock_pct`, `revenue_elasticity_to_customer_capex`, `own_capex_response`, `equity_funding_share`, `issue_price_per_share`). Any event can also take `threshold_value_per_share` (reverse stress; omit for `n/a`), `calibration_source`, `calibration_basis` and `reverse_stress_multiples` (8 ascending numbers). See [schemas/config.schema.json](schemas/config.schema.json).
 
 ## Checker limits (read before adapting)
 
-- **Independent reference inputs.** `scripts/reference_dcf.py` rebuilds every stress total from the `Inputs` sheet only, never from channel rows or FULL formulas. One exception: in the apparel example it also reads the raw tariff-bridge inputs (blue-font input cells) at `Event_Tariff!B21:B29`. If you adapt the apparel event, keep those inputs in that range or move them to `Inputs` and update `reference_dcf.py` to match.
+- **Independent reference inputs.** `scripts/reference_dcf.py` rebuilds every stress total from the `Inputs` sheet only, never from channel rows or FULL formulas. Two exceptions: it also reads the raw tariff-bridge inputs at `Event_Tariff!B21:B29` and the capex-cycle inputs at `Event_Capex!B21:B25` (blue / yellow input cells). If you adapt those events, keep the inputs in those ranges or move them to `Inputs` and update `reference_dcf.py` to match.
+- **Linear channels give a zero interaction.** In the template, the commodity channels and the rates WACC + mark-to-market channels add up linearly, so their interaction row is 0 by construction (the checker confirms it). Nonlinearity shows up where channels multiply: discounting (the rates mirror is asymmetric), price × elasticity on the tariff sheet, and the capex funding floor plus dilution.
+- **Capex-cycle simplifications.** The funding need is the PV of the incremental own capex, raised once at the valuation date and floored at zero (a capex cut needs no financing). The debt-funded part is value-neutral at fair value; the WACC weights are not re-levered. The shock is a permanent level shift through the terminal year.
 - **Direction checks come from the config, not the labels.** The expected sign of each channel (for example, higher rates lower equity value) is taken from the YAML (YAML Ain't Markup Language) config's test expectations. Prose labels in the workbook are not validated. If you build a deliberately unusual scenario, such as a negative rate shock, set the matching expected directions in the config, or the checker will FAIL it (or, worse, a wrong label will go unnoticed).
 
 ## Review gate

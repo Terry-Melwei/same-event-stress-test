@@ -172,6 +172,9 @@
         },
         "tariff": {
           "$ref": "#/$defs/eventSpec"
+        },
+        "capex": {
+          "$ref": "#/$defs/capexEventSpec"
         }
       }
     },
@@ -472,7 +475,108 @@
         },
         "label": {
           "type": "string"
+        },
+        "threshold_value_per_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Reverse stress threshold in $/sh (blended-mid proxy); null/absent = disabled (n/a)."
+        },
+        "calibration_source": {
+          "type": "string",
+          "description": "Source and date of the shock size. Default 'TO FILL: source'. Never invent a statistic."
+        },
+        "calibration_basis": {
+          "type": "string",
+          "description": "Basis of the shock size, e.g. historical 1-year 95th percentile move. Default 'TO FILL: basis'."
+        },
+        "reverse_stress_multiples": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "8 ascending multiples of the configured shock for the reverse stress grid."
         }
+      }
+    },
+    "capexEventSpec": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "threshold_value_per_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Reverse stress threshold in $/sh (blended-mid proxy); null/absent = disabled (n/a)."
+        },
+        "calibration_source": {
+          "type": "string",
+          "description": "Source and date of the shock size. Default 'TO FILL: source'. Never invent a statistic."
+        },
+        "calibration_basis": {
+          "type": "string",
+          "description": "Basis of the shock size, e.g. historical 1-year 95th percentile move. Default 'TO FILL: basis'."
+        },
+        "reverse_stress_multiples": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "8 ascending multiples of the configured shock for the reverse stress grid."
+        },
+        "customer_capex_shock_pct": {
+          "type": "number",
+          "description": "Customer capex shock (enter the adverse direction)."
+        },
+        "revenue_elasticity_to_customer_capex": {
+          "type": "number"
+        },
+        "own_capex_response": {
+          "type": "number"
+        },
+        "equity_funding_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "issue_price_per_share": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "customer_capex_shock_pct",
+          "revenue_elasticity_to_customer_capex",
+          "own_capex_response",
+          "equity_funding_share",
+          "issue_price_per_share",
+          "label"
+        ]
       }
     }
   }

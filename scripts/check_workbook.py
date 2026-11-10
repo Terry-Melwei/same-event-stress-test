@@ -2,8 +2,11 @@
 """Automated workbook gate for same-event multi-channel stress tests.
 
 Fails on: empty formula caches in the input file, pasted outputs, broken
-FULL→tornado→envelope→football→chart-source links, event shock/sign misses,
-pass-through invariant breaks, and (via --regression) known broken mutations.
+FULL→tornado→envelope→football→chart-source→Summary links, event shock/sign misses,
+pass-through invariant breaks, interaction rows that do not equal FULL minus the
+standalone channels, mirror / reverse-stress grids that disagree with the independent
+reference, a wrong reverse-stress result, a mis-ranked Summary, and (via --regression)
+known broken mutations.
 """
 
 from __future__ import annotations
@@ -24,18 +27,42 @@ from openpyxl import load_workbook
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from reference_dcf import reconcile_events  # noqa: E402
+from reference_dcf import (  # noqa: E402
+    blended_mid,
+    base_equity_perp,
+    capex_components,
+    configured_shock,
+    full_at,
+    load_inputs_from_workbook,
+    reconcile_events,
+    tariff_posture_equity,
+)
 
+# Blocks added to every event sheet (interaction, mirror, reverse grid, helpers)
+EXTRA_RANGES = ["D6:G12", "C61:G63", "B67:C67", "C69:H76", "B80:I88", "B55"]
 OUTPUT_RANGES = {
     "DCF": ["B19:B33", "B5:F16"],
-    "Event_Rates": ["D6:G11", "B23:B37"],
-    "Event_Commodity": ["D6:G11", "B43:B49", "B32:F32", "B37:F37", "B39:F41"],
-    "Event_Tariff": ["D6:G11", "B40:B52"],
-    "Tornado": ["B5:F6", "B8:B9", "B13:B14"],
-    "Envelope": ["B5:C7", "B9:C10"],
-    "Football": ["B5:D10", "F5:G10", "B12", "B14"],
+    "Event_Rates": ["B23:B37"] + EXTRA_RANGES,
+    "Event_Commodity": ["B43:B49", "B32:F32", "B37:F37", "B39:F41"] + EXTRA_RANGES,
+    "Event_Tariff": ["B40:F40", "B41:B52"] + EXTRA_RANGES,
+    "Event_Capex": ["B26:B27", "B30:F33", "B35:B49"] + EXTRA_RANGES,
+    "Summary": ["B5:K7", "B9", "C14:K16"],
+    "Tornado": ["B5:F7", "B8:B9", "B13:B15"],
+    "Envelope": ["B5:C8", "B9:C10"],
+    "Football": ["B5:D11", "F5:G11", "B12", "B14"],
     "PassThrough": ["B16:B19", "B22:B31", "B34:B37"],
 }
+
+EVENT_SHEETS = ("Event_Rates", "Event_Commodity", "Event_Tariff", "Event_Capex")
+# Standalone channel rows summed by the interaction row (tariff uses its ladder form instead)
+STANDALONE_ROWS = {
+    "Event_Rates": [6, 8],
+    "Event_Commodity": [6, 7, 8, 9],
+    "Event_Capex": [6, 7, 8],
+}
+ROW_INT, ROW_CONF, ROW_MIRROR, ROW_ASYM = 12, 61, 62, 63
+ROW_THRESHOLD, ROW_RESULT, ROW_GRID0, N_GRID = 66, 67, 69, 8
+ROW_CALIB_SOURCE, ROW_CALIB_BASIS = 56, 57
 
 # Required dependency chain cells (enumerated from workbook structure).
 # second_event_sheet is resolved from the workbook (Event_Commodity or Event_Tariff).
@@ -109,8 +136,43 @@ def detect_second_event(path: Path) -> str:
     raise RuntimeError("Workbook has neither Event_Commodity nor Event_Tariff")
 
 
-def chain_refs(second: str) -> dict[str, str]:
-    return {k: v.format(second=second) for k, v in CHAIN_TEMPLATE.items()}
+def has_capex(path: Path) -> bool:
+    wb = load_workbook(path, read_only=True)
+    out = "Event_Capex" in wb.sheetnames
+    wb.close()
+    return out
+
+
+def event_sheets(path: Path) -> list[str]:
+    """Enabled event sheets in Tornado order: rates, second event, optional capex."""
+    sheets = ["Event_Rates", detect_second_event(path)]
+    if has_capex(path):
+        sheets.append("Event_Capex")
+    return sheets
+
+
+CAPEX_CHAIN = {
+    "capex_full": "Event_Capex!D11",
+    "capex_pct": "Event_Capex!E11",
+    "capex_proxy_sh": "Event_Capex!G11",
+    "tornado_capex_pct": "Tornado!B7",
+    "tornado_capex_proxy": "Tornado!C7",
+    "tornado_capex_sh": "Tornado!D7",
+    "tornado_capex_delta": "Tornado!E7",
+    "chart_capex_delta": "Tornado!B15",
+    "envelope_capex": "Envelope!B8",
+    "envelope_capex_sh": "Envelope!C8",
+    "football_capex_low": "Football!B11",
+    "football_capex_high": "Football!D11",
+    "football_capex_width": "Football!G11",
+}
+
+
+def chain_refs(second: str, capex: bool = False) -> dict[str, str]:
+    refs = {k: v.format(second=second) for k, v in CHAIN_TEMPLATE.items()}
+    if capex:
+        refs.update(CAPEX_CHAIN)
+    return refs
 
 
 def read_values(path: Path, refs: list[str]) -> dict[str, Any]:
@@ -168,21 +230,13 @@ def recalc_libreoffice(src: Path, out_dir: Path) -> Path:
 
 def check_input_caches(path: Path) -> tuple[bool, str]:
     """FAIL when the file under test has empty formula caches."""
-    wb = load_workbook(path, data_only=True)
     required = ["DCF!B30", "DCF!B28", "Event_Rates!D11", "Tornado!C5", "Envelope!B9", "Football!B8"]
-    second = None
-    try:
-        if "Event_Commodity" in wb.sheetnames:
-            required.append("Event_Commodity!D11")
-            second = "Event_Commodity"
-        if "Event_Tariff" in wb.sheetnames:
-            # If both exist, require the one tornado links
-            pass
-    finally:
-        pass
+    for sheet in event_sheets(path)[1:]:
+        required.append(f"{sheet}!D11")
+    wb = load_workbook(path, read_only=True)
+    if "Summary" in wb.sheetnames:
+        required.append("Summary!E5")
     wb.close()
-    second = detect_second_event(path)
-    required.append(f"{second}!D11")
     vals = read_values(path, required)
     missing = [r for r, v in vals.items() if v is None]
     if missing:
@@ -250,7 +304,8 @@ def verify_dependency_chain(path: Path) -> tuple[list[str], list[str]]:
     failures: list[str] = []
     details: list[str] = []
     second = detect_second_event(path)
-    refs = chain_refs(second)
+    capex = has_capex(path)
+    refs = chain_refs(second, capex)
     formulas = read_formulas(path, list(refs.values()))
 
     def fx(key: str) -> str:
@@ -320,7 +375,47 @@ def verify_dependency_chain(path: Path) -> tuple[list[str], list[str]]:
         if val == 0 or val == 0.0 or val == "0":
             failures.append(f"Chain break: {refs[key]} is constant 0")
 
-    details.append(f"Dependency chain traced for rates + {second} ({len(refs)} cells)")
+    if capex:
+        must_be_formula("capex_full")
+        cx_full = fx("capex_full").replace(" ", "")
+        if cx_full in ("=DCF!B28", "=B46"):
+            failures.append(f"Chain break: Event_Capex!D11 = {cx_full} drops channels (financing mix / all)")
+        must_be_formula("tornado_capex_pct", ["Event_Capex!E11"])
+        must_be_formula("tornado_capex_proxy", ["Event_Capex!F11"])
+        must_be_formula("tornado_capex_sh", ["Event_Capex!G11"])
+        must_be_formula("tornado_capex_delta", ["C7"])
+        must_be_formula("chart_capex_delta", ["E7"])
+        must_be_formula("envelope_capex", ["Tornado!C7"])
+        must_be_formula("envelope_capex_sh", ["Tornado!D7"])
+        must_be_formula("football_capex_low", ["Tornado!D7"])
+        must_be_formula("football_capex_high", ["Tornado!D7"])
+        must_be_formula("football_capex_width", ["D11", "B11"])
+
+    # Summary: ranked cells must be live LARGE/INDEX/MATCH formulas over a source block that links
+    # to each event sheet (no pasted ranking).
+    wbf = load_workbook(path)
+    if "Summary" not in wbf.sheetnames:
+        failures.append("Summary sheet missing")
+    else:
+        sm = wbf["Summary"]
+        sheets = ["Event_Rates", second] + (["Event_Capex"] if capex else [])
+        for i, sheet in enumerate(sheets):
+            r = 14 + i
+            for col, token in (("D", f"{sheet}!G11"), ("E", f"{sheet}!G{ROW_MIRROR}"), ("F", f"{sheet}!E11"),
+                               ("H", f"{sheet}!G{ROW_INT}"), ("I", f"{sheet}!G{ROW_ASYM}"),
+                               ("J", f"{sheet}!B{ROW_RESULT}")):
+                v = sm[f"{col}{r}"].value
+                if not (isinstance(v, str) and v.startswith("=") and token in v):
+                    failures.append(f"Chain break: Summary!{col}{r}={v!r} must link to {token}")
+        for k in range(len(sheets)):
+            r = 5 + k
+            for col in "BCDEFGHIJK":
+                v = sm[f"{col}{r}"].value
+                if not (isinstance(v, str) and v.startswith("=") and "INDEX(" in v and "LARGE(" in v):
+                    failures.append(f"Chain break: Summary!{col}{r}={v!r} is not a live LARGE/INDEX ranking formula")
+    wbf.close()
+
+    details.append(f"Dependency chain traced for rates + {second}{' + Event_Capex' if capex else ''} ({len(refs)} cells + Summary)")
     if not failures:
         details.append("Dependency chain: OK")
     return failures, details
@@ -457,7 +552,18 @@ def run_shock_tests(
     return failures, details
 
 
-def default_shock_tests(second: str) -> list[dict]:
+CAPEX_SHOCK_TEST = {
+    "name": "capex_shock_bigger",
+    "sheet": "Event_Capex",
+    "cell": "B21",
+    "new_value": 0.45,
+    "full_cell": "Event_Capex!D11",
+    "expected_direction": "decrease",
+    "expect_unchanged": ["Event_Rates!D11"],
+}
+
+
+def default_shock_tests(second: str, capex: bool = False) -> list[dict]:
     tests = [
         {
             "name": "rates_bp_up",
@@ -493,11 +599,13 @@ def default_shock_tests(second: str) -> list[dict]:
                 "expect_unchanged": ["Event_Rates!D11"],
             }
         )
+    if capex:
+        tests.append(dict(CAPEX_SHOCK_TEST))
     return tests
 
 
-def default_live_tests(second: str) -> list[dict]:
-    return [
+def default_live_tests(second: str, capex: bool = False) -> list[dict]:
+    tests = [
         {
             "name": "revenue_growth",
             "sheet": "Inputs",
@@ -510,6 +618,8 @@ def default_live_tests(second: str) -> list[dict]:
                 "Tornado!C5",
                 "Envelope!B9",
                 "Football!B8",
+                "Summary!D14",
+                "Summary!D15",
             ],
         },
         {
@@ -523,10 +633,14 @@ def default_live_tests(second: str) -> list[dict]:
                 "Event_Rates!F11",
                 "Tornado!C5",
                 "Envelope!B9",
+                "Summary!D14",
             ],
             "expect_unchanged": [],  # second FULL may move via WACC in DCF shared paths for tariff; leave empty
         },
     ]
+    if capex:
+        tests[0]["expect_move"] += ["Event_Capex!D11", "Tornado!C7", "Summary!D16"]
+    return tests
 
 
 
@@ -737,7 +851,7 @@ def inspect_chart_series(path: Path, charts_cfg: dict) -> tuple[list[str], list[
                         f"Football width/visible series missing {want_width}; found {width_fs}"
                     )
                 # Visible series must NOT be the Low column (B) or Mid (C)
-                for bad in ("FOOTBALL!B5:B10", "FOOTBALL!$B$5:$B$10", "FOOTBALL!C5:C10"):
+                for bad in ("FOOTBALL!B5:B10", "FOOTBALL!C5:C10", "FOOTBALL!B5:B11", "FOOTBALL!C5:C11"):
                     if _normalize_ref(bad) in width_fs:
                         failures.append(
                             f"Football width series incorrectly references {_normalize_ref(bad)}"
@@ -756,7 +870,64 @@ def inspect_chart_series(path: Path, charts_cfg: dict) -> tuple[list[str], list[
     return failures, details
 
 
-def default_channel_tests(second: str) -> list[dict]:
+CAPEX_CHANNEL_TESTS = [
+    {
+        "name": "capex_revenue_elasticity",
+        "sheet": "Event_Capex",
+        "cell": "B22",
+        "new_value": 1.0,
+        "channel_cell": "Event_Capex!D6",
+        "full_cell": "Event_Capex!D11",
+        "expected_channel_direction": "increase",
+        "expected_full_direction": "increase",
+    },
+    {
+        "name": "capex_own_capex_response",
+        "sheet": "Event_Capex",
+        "cell": "B23",
+        "new_value": 1.6,
+        "channel_cell": "Event_Capex!D7",
+        "full_cell": "Event_Capex!D11",
+        "expected_channel_direction": "decrease",
+        "expected_full_direction": "decrease",
+    },
+    {
+        "name": "capex_equity_share",
+        "sheet": "Event_Capex",
+        "cell": "B24",
+        "new_value": 0.9,
+        "channel_cell": "Event_Capex!D8",
+        "full_cell": "Event_Capex!D11",
+        "expected_channel_direction": "decrease",
+        "expected_full_direction": "decrease",
+    },
+    {
+        "name": "capex_issue_price",
+        "sheet": "Event_Capex",
+        "cell": "B25",
+        "new_value": 30.0,
+        "channel_cell": "Event_Capex!D8",
+        "full_cell": "Event_Capex!D11",
+        "expected_channel_direction": "increase",
+        "expected_full_direction": "increase",
+    },
+]
+
+CAPEX_BINDINGS = [
+    {"cell": "Event_Capex!D6", "must_equal_formula": "=B43"},
+    {"cell": "Event_Capex!D7", "must_equal_formula": "=B44"},
+    {"cell": "Event_Capex!D8", "must_equal_formula": "=B45"},
+    {"cell": "Event_Capex!D11", "must_equal_formula": "=B47"},
+    {"cell": "Event_Capex!B47", "must_equal_formula": "=(B46-B40)*Inputs!B39/B41"},
+]
+
+
+def default_channel_tests(second: str, capex: bool = False) -> list[dict]:
+    extra = [dict(t) for t in CAPEX_CHANNEL_TESTS] if capex else []
+    return _default_channel_tests(second) + extra
+
+
+def _default_channel_tests(second: str) -> list[dict]:
     rates = [
         {
             "name": "rates_shock_bp",
@@ -867,7 +1038,12 @@ def default_channel_tests(second: str) -> list[dict]:
     ]
 
 
-def default_channel_bindings(second: str) -> list[dict]:
+def default_channel_bindings(second: str, capex: bool = False) -> list[dict]:
+    extra = [dict(b) for b in CAPEX_BINDINGS] if capex else []
+    return _default_channel_bindings(second) + extra
+
+
+def _default_channel_bindings(second: str) -> list[dict]:
     rates = [
         {"cell": "Event_Rates!D6", "must_equal_formula": "=B30", "adverse_vs_base": True},
         {"cell": "Event_Rates!D11", "must_equal_formula": "=B30+B35"},
@@ -886,16 +1062,18 @@ def default_channel_bindings(second: str) -> list[dict]:
     ]
 
 
-def default_charts_cfg() -> dict:
+def default_charts_cfg(capex: bool = False) -> dict:
+    t_last = 15 if capex else 14
+    f_last = 11 if capex else 10
     return {
         "tornado": {
-            "value_ref": "Tornado!$B$13:$B$14",
-            "cat_ref": "Tornado!$A$13:$A$14",
+            "value_ref": f"Tornado!$B$13:$B${t_last}",
+            "cat_ref": f"Tornado!$A$13:$A${t_last}",
         },
         "football": {
-            "baseline_value_ref": "Football!$F$5:$F$10",
-            "width_value_ref": "Football!$G$5:$G$10",
-            "cat_ref": "Football!$A$5:$A$10",
+            "baseline_value_ref": f"Football!$F$5:$F${f_last}",
+            "width_value_ref": f"Football!$G$5:$G${f_last}",
+            "cat_ref": f"Football!$A$5:$A${f_last}",
             "baseline_nofill": True,
         },
     }
@@ -918,17 +1096,17 @@ def _expand_a1_range(a1: str) -> set[str]:
 
 
 def verify_envelope_formula_coverage(path: Path) -> tuple[list[str], list[str]]:
-    """Parse Envelope MIN/MAX ranges; require {B5,B6,B7} (base + both FULL proxies)."""
+    """Parse Envelope MIN/MAX ranges; require base + every enabled event's FULL proxy."""
     failures, details = [], []
     fx = read_formulas(path, ["Envelope!B9", "Envelope!B10", "Envelope!C9", "Envelope!C10",
-                              "Envelope!B5", "Envelope!B6", "Envelope!B7",
                               "Football!B10", "Football!D10"])
-    # $m column uses B5:B7; $/sh column uses C5:C7 — both must span base + rates + second FULL
+    last = 5 + len(event_sheets(path))
+    rows = range(5, last + 1)
     required_by_cell = {
-        "Envelope!B9": {"B5", "B6", "B7"},
-        "Envelope!B10": {"B5", "B6", "B7"},
-        "Envelope!C9": {"C5", "C6", "C7"},
-        "Envelope!C10": {"C5", "C6", "C7"},
+        "Envelope!B9": {f"B{r}" for r in rows},
+        "Envelope!B10": {f"B{r}" for r in rows},
+        "Envelope!C9": {f"C{r}" for r in rows},
+        "Envelope!C10": {f"C{r}" for r in rows},
     }
     for cell, kind in (("Envelope!B9", "MIN"), ("Envelope!B10", "MAX"),
                        ("Envelope!C9", "MIN"), ("Envelope!C10", "MAX")):
@@ -960,13 +1138,177 @@ def verify_envelope_formula_coverage(path: Path) -> tuple[list[str], list[str]]:
     if not any("Football!B10" in f or "Football!D10" in f for f in failures):
         details.append("Football envelope band formulas link to Envelope!C9/C10 OK")
 
-    # Tornado endpoints must feed Envelope B6/B7
-    # (structural: B6=Tornado!C5, B7=Tornado!C6 already in chain; reinforce here)
     return failures, details
 
 
+def _close(a: Any, b: Any, tol_rel: float = 1e-4, tol_abs: float = 0.01) -> bool:
+    try:
+        a, b = float(a), float(b)
+    except (TypeError, ValueError):
+        return False
+    return abs(a - b) <= max(tol_abs, abs(b) * tol_rel)
+
+
+def expected_reverse_result(grid: list[tuple[float, float]], threshold: Any, base_sh: float) -> Any:
+    """grid = [(shock size, FULL proxy $/sh)] in ascending-multiple order."""
+    if threshold is None or threshold == "":
+        return "n/a"
+    thr = float(threshold)
+    if base_sh < thr:
+        return "base already below threshold"
+    for shock, sh in grid:
+        if sh < thr:
+            return shock
+    return "none in tested range"
+
+
+def verify_event_extras(path: Path) -> tuple[list[str], list[str], list[str]]:
+    """Interaction rows, up/down mirror, reverse-stress grid + result, calibration cells, Summary.
+
+    Values are checked against the independent reference (reference_dcf.py), not the sheet formulas.
+    Returns (failures, details, manual_review_items).
+    """
+    failures: list[str] = []
+    details: list[str] = []
+    manual: list[str] = []
+    m = load_inputs_from_workbook(path)
+    base = base_equity_perp(m)
+    blend = blended_mid(m)
+    base_sh = blend / m.diluted_shares
+    wb = load_workbook(path, data_only=True)
+    wbf = load_workbook(path)
+    sheets = event_sheets(path)
+    summary_src: list[dict[str, Any]] = []
+
+    def proxy_sh(eq: float) -> float:
+        return blend * (1.0 + (eq - base) / base) / m.diluted_shares
+
+    for sheet in sheets:
+        ws, wf = wb[sheet], wbf[sheet]
+        # --- interaction row ---
+        kind = str(ws[f"B{ROW_INT}"].value or "").lower()
+        int_fx = wf[f"D{ROW_INT}"].value
+        if kind != "diagnostic":
+            failures.append(f"Interaction: {sheet}!B{ROW_INT} kind must be 'diagnostic', got {kind!r}")
+        if not (isinstance(int_fx, str) and int_fx.startswith("=")):
+            failures.append(f"Interaction: {sheet}!D{ROW_INT} is not a live formula ({int_fx!r})")
+        full_fx = str(wf["D11"].value or "")
+        if re.search(rf"\b[D-G]{ROW_INT}\b", full_fx):
+            failures.append(f"Interaction: {sheet}!D11 FULL references the interaction row ({full_fx})")
+        d = {r: ws[f"D{r}"].value for r in range(6, 12)}
+        if any(v is None for v in d.values()):
+            failures.append(f"Interaction: {sheet} channel values missing")
+            continue
+        d = {r: float(v) for r, v in d.items()}
+        if sheet == "Event_Tariff":
+            mit_only = tariff_posture_equity(m, pass_through=0.0, elasticity=0.0, markdown=0.0,
+                                             mitigation=float(m.tariff_mitigation))
+            exp_int = d[11] - d[9] - (mit_only - d[6])
+        else:
+            exp_int = (d[11] - base) - sum(d[r] - base for r in STANDALONE_ROWS[sheet])
+        if sheet == "Event_Capex":
+            c = capex_components(m)
+            ref_int = (c["full"] - base) - sum(c[k] - base for k in ("A", "B", "C"))
+            if not _close(exp_int, ref_int):
+                failures.append(f"Interaction: {sheet} channel rows imply {exp_int}, reference {ref_int}")
+        wb_int = ws[f"D{ROW_INT}"].value
+        if not _close(wb_int, exp_int):
+            failures.append(f"Interaction: {sheet}!D{ROW_INT}={wb_int} != FULL − standalones {exp_int}")
+        else:
+            details.append(f"Interaction OK: {sheet}!D{ROW_INT}={float(wb_int):.4f}")
+
+        # --- up / down mirror ---
+        shock = float(configured_shock(m, sheet))
+        ref_mirror = full_at(m, sheet, -shock)
+        if not _close(ws[f"D{ROW_CONF}"].value, d[11]):
+            failures.append(f"Mirror: {sheet}!D{ROW_CONF} must equal FULL D11")
+        if not _close(ws[f"D{ROW_MIRROR}"].value, ref_mirror):
+            failures.append(f"Mirror: {sheet}!D{ROW_MIRROR}={ws[f'D{ROW_MIRROR}'].value} != reference {ref_mirror}")
+        else:
+            details.append(f"Mirror OK: {sheet} FULL at −shock = {ref_mirror:.4f}")
+        exp_asym = (d[11] - base) + (ref_mirror - base)
+        if not _close(ws[f"D{ROW_ASYM}"].value, exp_asym):
+            failures.append(f"Asymmetry: {sheet}!D{ROW_ASYM}={ws[f'D{ROW_ASYM}'].value} != {exp_asym}")
+
+        # --- reverse stress grid + result ---
+        grid: list[tuple[float, float]] = []
+        prev_mult = 0.0
+        grid_ok = True
+        for i in range(N_GRID):
+            r = ROW_GRID0 + i
+            mult = ws[f"B{r}"].value
+            if mult is None or float(mult) <= prev_mult:
+                failures.append(f"Reverse grid: {sheet}!B{r} multiple {mult} must be > previous ({prev_mult})")
+                grid_ok = False
+                break
+            prev_mult = float(mult)
+            x = shock * prev_mult
+            ref_eq = full_at(m, sheet, x)
+            if not _close(ws[f"D{r}"].value, ref_eq):
+                failures.append(f"Reverse grid: {sheet}!D{r}={ws[f'D{r}'].value} != reference {ref_eq} at shock {x}")
+                grid_ok = False
+            if not _close(ws[f"G{r}"].value, proxy_sh(ref_eq), tol_abs=1e-4):
+                failures.append(f"Reverse grid: {sheet}!G{r} proxy $/sh mismatch")
+                grid_ok = False
+            grid.append((x, proxy_sh(ref_eq)))
+        if grid_ok:
+            details.append(f"Reverse grid OK: {sheet} {N_GRID} steps match reference")
+        thr = ws[f"B{ROW_THRESHOLD}"].value
+        exp_res = expected_reverse_result(grid, thr, base_sh)
+        got = ws[f"B{ROW_RESULT}"].value
+        if isinstance(exp_res, float):
+            ok = _close(got, exp_res, tol_abs=1e-9)
+        else:
+            ok = got == exp_res
+        if not ok:
+            failures.append(f"Reverse stress: {sheet}!B{ROW_RESULT}={got!r}, expected {exp_res!r} (threshold {thr!r})")
+        else:
+            details.append(f"Reverse stress OK: {sheet} threshold={thr!r} → {got!r}")
+
+        # --- calibration disclosure ---
+        for r, what in ((ROW_CALIB_SOURCE, "source"), (ROW_CALIB_BASIS, "basis")):
+            v = ws[f"B{r}"].value
+            if v is None or str(v).strip() == "":
+                failures.append(f"Calibration: {sheet}!B{r} ({what}) is empty — write TO FILL or cite it")
+            elif str(v).upper().startswith("TO FILL"):
+                manual.append(f"{sheet}!B{r} calibration {what} is '{v}' — must be sourced before a real-issuer CLEAR")
+
+        summary_src.append({
+            "sheet": sheet,
+            "conf_sh": ws["G11"].value,
+            "mirror_sh": proxy_sh(ref_mirror),
+            "delta_sh": proxy_sh(d[11]) - base_sh,
+            "result": got,
+        })
+
+    # --- Summary ranking (independent sort of the event-sheet values) ---
+    if "Summary" in wb.sheetnames:
+        sm = wb["Summary"]
+        ranked = sorted(enumerate(summary_src), key=lambda t: (-abs(t[1]["delta_sh"]), t[0]))
+        sm_ok = True
+        for k, (_i, ev) in enumerate(ranked):
+            r = 5 + k
+            if sm[f"C{r}"].value != ev["sheet"]:
+                failures.append(f"Summary: rank {k + 1} is {sm[f'C{r}'].value!r}, expected {ev['sheet']}")
+                sm_ok = False
+                continue
+            lo, hi = sorted([float(ev["conf_sh"]), ev["mirror_sh"]])
+            for col, exp in (("E", lo), ("F", hi), ("H", ev["delta_sh"])):
+                if not _close(sm[f"{col}{r}"].value, exp, tol_abs=1e-4):
+                    failures.append(f"Summary!{col}{r}={sm[f'{col}{r}'].value} != {exp}")
+                    sm_ok = False
+            if sm[f"K{r}"].value != ev["result"]:
+                failures.append(f"Summary!K{r}={sm[f'K{r}'].value!r} != event result {ev['result']!r}")
+                sm_ok = False
+        if sm_ok:
+            details.append(f"Summary ranking OK ({' > '.join(e['sheet'] for _i, e in ranked)})")
+    wb.close()
+    wbf.close()
+    return failures, details, manual
+
+
 def run_regression_mutations(good: Path, config: Path | None) -> int:
-    """Reviewer mutations (9+) — each must FAIL."""
+    """Reviewer mutations (13, or 16 with Event_Capex) — each must FAIL."""
     results = []
 
     def record(name, rc, reason):
@@ -1122,6 +1464,66 @@ def run_regression_mutations(good: Path, config: Path | None) -> int:
         if not record("Envelope!B9=MIN(B5:B6)", rc, "envelope coverage / reconciliation"):
             return 1
 
+        def mutate(tag: str, edits: dict[str, Any]) -> int:
+            src = td_path / f"mut_{tag}.xlsx"
+            shutil.copy2(good, src)
+            wb = load_workbook(src)
+            for ref, val in edits.items():
+                sh, cell = parse_cell_ref(ref)
+                wb[sh][cell] = val
+            wb.save(src)
+            wb.close()
+            mut = recalc_libreoffice(src, td_path / f"mut_{tag}_recalc")
+            return main_check(mut, config, skip_recalc=False, run_regression=False)
+
+        cached = read_values(good, ["Event_Rates!D12", "Summary!E5"])
+
+        # 10) Interaction row pasted as a number (looks right today, goes stale tomorrow)
+        print("=== 10) interaction row pasted ===")
+        rc = mutate("int_paste", {"Event_Rates!D12": cached["Event_Rates!D12"] or 0.0})
+        if not record("Event_Rates!D12 pasted value", rc, "pasted constant / interaction not live"):
+            return 1
+
+        # 11) Interaction row sums an INFORMATION row (B) as if it were a standalone channel
+        print("=== 11) interaction includes information row ===")
+        rc = mutate("int_info", {
+            "Event_Rates!D12": "=(D11-DCF!$B$28)-((D6-DCF!$B$28)+(D7-DCF!$B$28)+(D8-DCF!$B$28))",
+        })
+        if not record("Event_Rates!D12 includes info row B", rc, "interaction != FULL − standalones"):
+            return 1
+
+        # 12) Summary ranking pasted
+        print("=== 12) Summary ranked cell pasted ===")
+        rc = mutate("sum_paste", {"Summary!E5": cached["Summary!E5"] or 0.0})
+        if not record("Summary!E5 pasted value", rc, "Summary ranking not live"):
+            return 1
+
+        # 13) Reverse-stress result pasted as n/a while a threshold is set
+        print("=== 13) reverse-stress result pasted ===")
+        thr = read_values(good, ["DCF!B33"])["DCF!B33"]
+        rc = mutate("rev_paste", {"Event_Rates!B66": round(float(thr) * 0.9, 2), "Event_Rates!B67": "n/a"})
+        if not record("Event_Rates!B67 pasted 'n/a' with threshold", rc, "reverse-stress result wrong / not live"):
+            return 1
+
+        if has_capex(good):
+            # 14) FULL omits the capex financing channel (operating-only A+B row)
+            print("=== 14) Event_Capex FULL omits financing ===")
+            rc = mutate("capex_nofin", {"Event_Capex!D11": "=B46"})
+            if not record("Event_Capex!D11=B46 (no financing)", rc, "FULL omits financing mix channel"):
+                return 1
+
+            # 15) Financing counted twice (net-debt change subtracted twice)
+            print("=== 15) Event_Capex financing double count ===")
+            rc = mutate("capex_dbl", {"Event_Capex!B47": "=(B46-B40-B40)*Inputs!B39/B41"})
+            if not record("Event_Capex!B47 double-counts financing", rc, "FULL reconciliation mismatch"):
+                return 1
+
+            # 16) Envelope skips the capex FULL proxy
+            print("=== 16) Envelope MIN(B5:B7) skips capex ===")
+            rc = mutate("env_capex", {"Envelope!B9": "=MIN(B5:B7)", "Envelope!C9": "=MIN(C5:C7)"})
+            if not record("Envelope!B9=MIN(B5:B7) with capex", rc, "envelope coverage"):
+                return 1
+
     print("\n=== Regression table ===")
     print(f"{'mutation':<42} {'result':<6} reason")
     for name, status, reason in results:
@@ -1152,17 +1554,26 @@ def main_check(
         return 1
 
     second = detect_second_event(workbook)
-    details.append(f"Second event sheet: {second}")
+    capex = has_capex(workbook)
+    details.append(f"Event sheets: {', '.join(event_sheets(workbook))}")
 
     cfg: dict[str, Any] = {}
     if config:
         cfg = yaml.safe_load(config.read_text(encoding="utf-8"))
     checks_cfg = cfg.get("checks") or {}
-    live_tests = checks_cfg.get("live_tests") or default_live_tests(second)
-    shock_tests = checks_cfg.get("shock_tests") or default_shock_tests(second)
-    channel_tests = checks_cfg.get("channel_tests") or default_channel_tests(second)
-    channel_bindings = checks_cfg.get("channel_bindings") or default_channel_bindings(second)
-    charts_cfg = checks_cfg.get("charts") or default_charts_cfg()
+    live_tests = checks_cfg.get("live_tests") or default_live_tests(second, capex)
+    shock_tests = checks_cfg.get("shock_tests") or default_shock_tests(second, capex)
+    channel_tests = checks_cfg.get("channel_tests") or default_channel_tests(second, capex)
+    channel_bindings = checks_cfg.get("channel_bindings") or default_channel_bindings(second, capex)
+    charts_cfg = checks_cfg.get("charts") or default_charts_cfg(capex)
+    if capex:
+        # A config that lists its own tests must still cover the capex event (financing channel included).
+        if not any(t.get("full_cell") == "Event_Capex!D11" for t in shock_tests):
+            shock_tests = list(shock_tests) + [dict(CAPEX_SHOCK_TEST)]
+        if not any(t.get("full_cell") == "Event_Capex!D11" for t in channel_tests):
+            channel_tests = list(channel_tests) + [dict(t) for t in CAPEX_CHANNEL_TESTS]
+        if not any(b["cell"].startswith("Event_Capex!") for b in channel_bindings):
+            channel_bindings = list(channel_bindings) + [dict(b) for b in CAPEX_BINDINGS]
 
     # Normalize second-event refs in live tests if config still says Event_Commodity
     if second == "Event_Tariff":
@@ -1215,6 +1626,12 @@ def main_check(
         recon_fail, recon_detail, _ind = reconcile_events(workbook, second)
         failures.extend(recon_fail)
         details.extend(recon_detail)
+
+        # Interaction rows, mirror, reverse-stress grid/result, calibration, Summary ranking
+        ex_fail, ex_detail, ex_manual = verify_event_extras(base)
+        failures.extend(ex_fail)
+        details.extend(ex_detail)
+        manual.extend(ex_manual)
 
         # Tariff-specific: if Event_Tariff present, FULL equity < base at configured <100% PT
         if second == "Event_Tariff":

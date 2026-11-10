@@ -1,11 +1,18 @@
-"""CI tests that need no LibreOffice.
+"""CI tests for the generator, the shipped workbooks and the checker.
 
+No LibreOffice needed:
 1. generate.py runs on every example config (catches syntax/runtime breakage).
 2. Freshly generated formulas match the shipped, recalculated workbooks.
-3. check_workbook.py --skip-recalc PASSes on the shipped workbooks (they carry caches).
-   Its live-input tests recalculate with LibreOffice, so this is skipped if `soffice`
-   is not on PATH (the CI workflow installs it).
-4. check_workbook.py FAILs on a fresh, uncached workbook (empty-cache guard).
+3. check_workbook.py FAILs on a fresh, uncached workbook (empty-cache guard).
+4. The capex financing channel is paired once (new shares × issue price = net-debt change).
+
+Need LibreOffice (`soffice` on PATH; the CI workflow installs it), skipped otherwise:
+5. check_workbook.py PASSes on every shipped workbook.
+6. After recalculation, every interaction row equals FULL minus the standalone channel rows.
+7. The capex FULL / standalones match the independent reference (reference_dcf.py).
+8. The reverse-stress result is the smallest tested adverse step whose FULL $/sh is below the
+   threshold (and the previous step is at/above it); a blank threshold gives 'n/a'.
+9. The Summary sheet ranks events by absolute FULL change in $/sh.
 
 The slower --regression mutation run is left to local use (see README).
 """
@@ -18,11 +25,18 @@ import openpyxl
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from reference_dcf import base_equity_perp, capex_components, load_inputs_from_workbook  # noqa: E402
+
 CASES = {
     "default_illustrative": ROOT / "templates" / "stress_template.xlsx",
     "gold_miner": ROOT / "examples" / "workbooks" / "gold_miner.xlsx",
     "apparel_retailer": ROOT / "examples" / "workbooks" / "apparel_retailer.xlsx",
+    "optical_supplier": ROOT / "examples" / "workbooks" / "optical_supplier.xlsx",
 }
+STANDALONE_ROWS = {"Event_Rates": [6, 8], "Event_Commodity": [6, 7, 8, 9], "Event_Capex": [6, 7, 8]}
+GRID = range(69, 77)
+needs_lo = pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice (soffice) not installed")
 
 
 def _run(*args):
@@ -32,6 +46,15 @@ def _run(*args):
 
 def _config(name):
     return ROOT / "examples" / "configs" / f"{name}.yaml"
+
+
+def _recalc(src: Path, out_dir: Path) -> Path:
+    from check_workbook import recalc_libreoffice
+    return recalc_libreoffice(src, out_dir)
+
+
+def _event_sheets(wb):
+    return [s for s in wb.sheetnames if s.startswith("Event_")]
 
 
 @pytest.fixture(scope="module")
@@ -44,6 +67,14 @@ def generated(tmp_path_factory):
         assert res.returncode == 0, res.stdout + res.stderr
         paths[name] = path
     return paths
+
+
+@pytest.fixture(scope="module")
+def recalculated(generated, tmp_path_factory):
+    if shutil.which("soffice") is None:
+        pytest.skip("LibreOffice (soffice) not installed")
+    out = tmp_path_factory.mktemp("recalc")
+    return {name: _recalc(path, out / name) for name, path in generated.items()}
 
 
 @pytest.mark.parametrize("name", list(CASES))
@@ -62,7 +93,25 @@ def test_generated_formulas_match_shipped(generated, name):
     assert not diffs, diffs[:20]
 
 
-@pytest.mark.skipif(shutil.which("soffice") is None, reason="LibreOffice (soffice) not installed")
+def test_summary_sheet_follows_cover(generated):
+    for path in generated.values():
+        names = openpyxl.load_workbook(path).sheetnames
+        assert names[:2] == ["Cover", "Summary"]
+
+
+def test_capex_financing_paired_once():
+    """Equity-funded cash lowers net debt by exactly new shares × issue price (one step, both sides)."""
+    wb = openpyxl.load_workbook(CASES["optical_supplier"], data_only=True)
+    cx = wb["Event_Capex"]
+    new_shares, price, nd_change = cx["B39"].value, cx["B25"].value, cx["B40"].value
+    assert new_shares > 0
+    assert new_shares * price == pytest.approx(-nd_change)
+    assert cx["B41"].value == pytest.approx(wb["Inputs"]["B39"].value + new_shares)
+    # FULL must include the financing step: it differs from the operating-only information row
+    assert cx["D11"].value != pytest.approx(cx["D9"].value)
+
+
+@needs_lo
 @pytest.mark.parametrize("name", list(CASES))
 def test_checker_passes_on_shipped(name):
     res = _run("scripts/check_workbook.py", CASES[name], "--config", _config(name), "--skip-recalc")
@@ -75,3 +124,111 @@ def test_checker_rejects_uncached(generated):
                "--config", _config("gold_miner"), "--skip-recalc")
     assert res.returncode != 0
     assert "Empty formula caches" in res.stdout + res.stderr
+
+
+@needs_lo
+@pytest.mark.parametrize("name", list(CASES))
+def test_interaction_row_equals_full_minus_standalones(recalculated, name):
+    wb = openpyxl.load_workbook(recalculated[name], data_only=True)
+    wf = openpyxl.load_workbook(recalculated[name])
+    base = wb["DCF"]["B28"].value
+    for sheet in _event_sheets(wb):
+        ws = wb[sheet]
+        assert ws["B12"].value == "diagnostic"
+        assert str(wf[sheet]["D12"].value).startswith("=")
+        assert "12" not in str(wf[sheet]["D11"].value)  # FULL never reads the diagnostic
+        d = {r: ws[f"D{r}"].value for r in range(6, 12)}
+        if sheet == "Event_Tariff":
+            expected = d[11] - d[9] - (ws["B47"].value - d[6])
+        else:
+            expected = (d[11] - base) - sum(d[r] - base for r in STANDALONE_ROWS[sheet])
+        assert ws["D12"].value == pytest.approx(expected, abs=1e-6), sheet
+        assert ws["G12"].value == pytest.approx(
+            wb["DCF"]["B30"].value * expected / base / wb["Inputs"]["B39"].value, abs=1e-9)
+    # Blend lock: the blended midpoint still averages the two method rows only
+    assert wf["DCF"]["B30"].value == "=(B28+B29)/2"
+
+
+@needs_lo
+def test_capex_matches_independent_reference(recalculated):
+    path = recalculated["optical_supplier"]
+    wb = openpyxl.load_workbook(path, data_only=True)
+    cx = wb["Event_Capex"]
+    m = load_inputs_from_workbook(path)
+    ref = capex_components(m)
+    assert base_equity_perp(m) == pytest.approx(wb["DCF"]["B28"].value, rel=1e-9)
+    for row, key in ((6, "A"), (7, "B"), (8, "C"), (9, "ops"), (11, "full")):
+        assert cx[f"D{row}"].value == pytest.approx(ref[key], rel=1e-9), key
+    # Mirror (−shock) has no funding need, so the financing channel switches off: asymmetric by design
+    mirror = capex_components(m, -m.capex_shock)
+    assert mirror["need"] == 0
+    assert cx["D62"].value == pytest.approx(mirror["full"], rel=1e-9)
+
+
+def _grid(ws):
+    return [(ws[f"C{r}"].value, ws[f"G{r}"].value) for r in GRID]
+
+
+@needs_lo
+@pytest.mark.parametrize("name", ["default_illustrative", "apparel_retailer", "optical_supplier"])
+def test_reverse_stress_threshold(recalculated, tmp_path, name):
+    shipped = openpyxl.load_workbook(recalculated[name], data_only=True)
+    sheets = _event_sheets(shipped)
+    # 1) Blank threshold -> 'n/a' (the shipped default unless a config sets one)
+    for sheet in sheets:
+        if shipped[sheet]["B66"].value is None:
+            assert shipped[sheet]["B67"].value == "n/a"
+    # 2) Threshold between grid steps 2 and 3 -> step 3 reported; step 2 at/above it.
+    #    Also one threshold above base ("base already below") and one below every step ("none").
+    thresholds = {}
+    for sheet in sheets:
+        g = [sh for _x, sh in _grid(shipped[sheet])]
+        assert g[1] > g[2], f"{sheet}: grid not adverse in the configured direction"
+        thresholds[sheet] = (g[1] + g[2]) / 2
+    copy = tmp_path / f"{name}_thr.xlsx"
+    wb = openpyxl.load_workbook(recalculated[name])
+    for sheet, thr in thresholds.items():
+        wb[sheet]["B66"] = thr
+    wb.save(copy)
+    out = openpyxl.load_workbook(_recalc(copy, tmp_path / "thr"), data_only=True)
+    for sheet, thr in thresholds.items():
+        ws = out[sheet]
+        grid = _grid(ws)
+        result = ws["B67"].value
+        below = [i for i, (_x, sh) in enumerate(grid) if sh < thr]
+        assert below, sheet
+        k = below[0]
+        assert result == pytest.approx(grid[k][0]), (sheet, result, grid)
+        assert grid[k][1] < thr <= grid[k - 1][1] if k > 0 else out["DCF"]["B33"].value >= thr
+        assert k == 2
+        assert ws["C67"].value == pytest.approx(ws[f"B{GRID[k]}"].value)
+
+    edge = tmp_path / f"{name}_edge.xlsx"
+    wb = openpyxl.load_workbook(recalculated[name])
+    base_sh = shipped["DCF"]["B33"].value
+    wb["Event_Rates"]["B66"] = base_sh * 1.01
+    wb[sheets[1]]["B66"] = min(sh for _x, sh in _grid(shipped[sheets[1]])) - 1.0
+    wb.save(edge)
+    out = openpyxl.load_workbook(_recalc(edge, tmp_path / "edge"), data_only=True)
+    assert out["Event_Rates"]["B67"].value == "base already below threshold"
+    assert out[sheets[1]]["B67"].value == "none in tested range"
+
+
+@needs_lo
+def test_summary_ranks_by_abs_full_change(recalculated):
+    for name, path in recalculated.items():
+        wb = openpyxl.load_workbook(path, data_only=True)
+        base_sh = wb["DCF"]["B33"].value
+        sheets = _event_sheets(wb)
+        deltas = {s: wb[s]["G11"].value - base_sh for s in sheets}
+        order = sorted(sheets, key=lambda s: -abs(deltas[s]))
+        sm = wb["Summary"]
+        assert [sm[f"C{5 + k}"].value for k in range(len(sheets))] == order, name
+        for k, s in enumerate(order):
+            r = 5 + k
+            pair = sorted([wb[s]["G11"].value, wb[s]["G62"].value])
+            assert sm[f"E{r}"].value == pytest.approx(pair[0])
+            assert sm[f"F{r}"].value == pytest.approx(pair[1])
+            assert sm[f"H{r}"].value == pytest.approx(deltas[s])
+            assert sm[f"I{r}"].value == pytest.approx(wb[s]["G12"].value)
+            assert sm[f"K{r}"].value == wb[s]["B67"].value

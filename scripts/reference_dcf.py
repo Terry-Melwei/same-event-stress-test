@@ -1,8 +1,10 @@
 """Independent reference DCF + joint event scenarios for checker reconciliation.
 
-Does not read channel rows or FULL formulas — only Inputs (and Event_Tariff bridge
-inputs when present). Must reproduce base perpetual equity exactly before
-joint-scenario compares.
+Does not read channel rows or FULL formulas — only Inputs (plus the blue / yellow
+event inputs on Event_Tariff B21:B29 and Event_Capex B21:B25 when those sheets are
+present). Must reproduce base perpetual equity exactly before joint-scenario compares.
+Every joint function takes an optional shock so the up/down mirror and the reverse
+stress grid can be recomputed independently too.
 """
 
 from __future__ import annotations
@@ -51,6 +53,12 @@ class ModelInputs:
     tariff_elasticity: float | None = None
     tariff_markdown: float | None = None
     tariff_mitigation: float | None = None
+    # capex-cycle event (optional)
+    capex_shock: float | None = None
+    capex_rev_elasticity: float | None = None
+    capex_own_response: float | None = None
+    capex_equity_share: float | None = None
+    capex_issue_price: float | None = None
 
 
 def _num(v: Any, default: float | None = None) -> float | None:
@@ -70,7 +78,6 @@ def load_inputs_from_workbook(path) -> ModelInputs:
     # blank override may be None
     wacc_override = None if override is None or override == "" else float(override)
 
-    tariff = None
     tu = tp = tuc = tfc = tcs = tpt = te = tmd = tmit = None
     if "Event_Tariff" in wb.sheetnames:
         et = wb["Event_Tariff"]
@@ -83,6 +90,14 @@ def load_inputs_from_workbook(path) -> ModelInputs:
         te = _num(et["B27"].value)
         tmd = _num(et["B28"].value)
         tmit = _num(et["B29"].value)
+    cxs = cxe = cxk = cxq = cxp = None
+    if "Event_Capex" in wb.sheetnames:
+        ex = wb["Event_Capex"]
+        cxs = _num(ex["B21"].value)
+        cxe = _num(ex["B22"].value)
+        cxk = _num(ex["B23"].value)
+        cxq = _num(ex["B24"].value)
+        cxp = _num(ex["B25"].value)
 
     mi = ModelInputs(
         revenue_y0=float(b("B5")),
@@ -120,6 +135,11 @@ def load_inputs_from_workbook(path) -> ModelInputs:
         tariff_elasticity=te,
         tariff_markdown=tmd,
         tariff_mitigation=tmit,
+        capex_shock=cxs,
+        capex_rev_elasticity=cxe,
+        capex_own_response=cxk,
+        capex_equity_share=cxq,
+        capex_issue_price=cxp,
     )
     wb.close()
     return mi
@@ -226,10 +246,10 @@ def blended_mid(m: ModelInputs) -> float:
     return 0.5 * (base_equity_perp(m) + base_equity_exit(m))
 
 
-def rates_joint_equity(m: ModelInputs) -> float:
+def rates_joint_equity(m: ModelInputs, shock_bp: float | None = None) -> float:
     """FULL = equity @ selected_wacc+Δ with base FCFF, + fixed-debt MTM bridge relief."""
     w0 = selected_wacc(m)
-    delta = m.rate_shock_bp / 10000.0
+    delta = (m.rate_shock_bp if shock_bp is None else shock_bp) / 10000.0
     w_s = w0 + delta
     eq_wacc = equity_from_fcff(base_fcff(m), w_s, m.terminal_g, net_debt(m))
     fixed_debt = m.gross_debt * (1.0 - m.floating_share)
@@ -237,9 +257,9 @@ def rates_joint_equity(m: ModelInputs) -> float:
     return eq_wacc + mtm
 
 
-def commodity_joint_equity(m: ModelInputs) -> float:
+def commodity_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
     """FULL A+B+C+D: price→rev; opex via cost elasticity; royalty on stressed; adj capex on base vol."""
-    shock = m.commodity_shock
+    shock = m.commodity_shock if shock is None else shock
     price_factor = 1.0 + shock
     opex_factor = 1.0 + m.cost_elasticity * shock
     capex_pct = m.capex_pct * (1.0 + m.capex_price_elasticity * shock)
@@ -262,12 +282,13 @@ def _tariff_delta_nopat_years(
     elasticity: float,
     markdown: float,
     mitigation: float,
+    cost_shock: float | None = None,
 ) -> list[float]:
     assert m.tariff_units is not None
     units0 = m.tariff_units
     price = m.tariff_price
     unit_cost = m.tariff_unit_cost
-    cost_shock = m.tariff_cost_shock
+    cost_shock = m.tariff_cost_shock if cost_shock is None else cost_shock
     deltas = []
     for t in range(1, 6):
         units = units0 * ((1.0 + m.growth) ** t)
@@ -288,7 +309,18 @@ def _tariff_delta_nopat_years(
     return deltas
 
 
-def tariff_joint_equity(m: ModelInputs) -> float:
+def tariff_posture_equity(
+    m: ModelInputs, *, pass_through: float, elasticity: float, markdown: float, mitigation: float
+) -> float:
+    """Equity at an arbitrary tariff posture (used for the mitigation-only interaction term)."""
+    deltas = _tariff_delta_nopat_years(
+        m, pass_through=pass_through, elasticity=elasticity, markdown=markdown, mitigation=mitigation
+    )
+    stressed = [b + d for b, d in zip(base_fcff(m), deltas)]
+    return equity_from_fcff(stressed, selected_wacc(m), m.terminal_g, net_debt(m))
+
+
+def tariff_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
     """FULL = PV(base FCFF + joint ΔNOPAT) - net debt at selected WACC."""
     deltas = _tariff_delta_nopat_years(
         m,
@@ -296,10 +328,88 @@ def tariff_joint_equity(m: ModelInputs) -> float:
         elasticity=float(m.tariff_elasticity),
         markdown=float(m.tariff_markdown),
         mitigation=float(m.tariff_mitigation),
+        cost_shock=shock,
     )
     base = base_fcff(m)
     stressed = [b + d for b, d in zip(base, deltas)]
     return equity_from_fcff(stressed, selected_wacc(m), m.terminal_g, net_debt(m))
+
+
+def _capex_fcff(m: ModelInputs, x: float, rev_on: bool, capex_on: bool) -> list[float]:
+    """Capex-cycle FCFF: own revenue × (1 + elasticity·x); own capex × (1 + response·x).
+
+    Opex, royalty and ΔNWC follow revenue; D&A and capex stay at base dollars unless capex_on.
+    """
+    e = float(m.capex_rev_elasticity)
+    k = float(m.capex_own_response)
+    out: list[float] = []
+    prev = m.revenue_y0
+    for t in range(1, 6):
+        base_rev = m.revenue_y0 * ((1.0 + m.growth) ** t)
+        rev = base_rev * (1.0 + e * x) if rev_on else base_rev
+        nopat = rev * (1.0 - m.opex_pct - m.royalty_rate) * (1.0 - m.tax)
+        da = base_rev * m.da_pct
+        capex = base_rev * m.capex_pct * ((1.0 + k * x) if capex_on else 1.0)
+        dnwc = -(rev - prev) * m.nwc_pct
+        prev = rev
+        out.append(nopat + da - capex + dnwc)
+    return out
+
+
+def capex_components(m: ModelInputs, shock: float | None = None) -> dict[str, float]:
+    """Standalone A (revenue), B (own capex), C (financing mix) and FULL, per pre-event share basis.
+
+    Funding need = MAX(0, PV of incremental own capex) raised once at t0: the equity part lowers net
+    debt and adds new diluted shares at the issue price; the debt part adds debt and cash equally.
+    Values are equity attributable to the pre-event diluted shares ($m).
+    """
+    assert m.capex_rev_elasticity is not None, "Event_Capex inputs missing"
+    x = float(m.capex_shock) if shock is None else shock
+    w = selected_wacc(m)
+    nd = net_debt(m)
+    g = m.terminal_g
+    n0 = m.diluted_shares
+    base = base_equity_perp(m)
+    a = equity_from_fcff(_capex_fcff(m, x, True, False), w, g, nd)
+    b = equity_from_fcff(_capex_fcff(m, x, False, True), w, g, nd)
+    ops = equity_from_fcff(_capex_fcff(m, x, True, True), w, g, nd)
+    k = float(m.capex_own_response)
+    pv_inc = sum(
+        m.revenue_y0 * ((1.0 + m.growth) ** t) * m.capex_pct * k * x / ((1.0 + w) ** t) for t in range(1, 6)
+    )
+    need = max(0.0, pv_inc)
+    e_new = float(m.capex_equity_share) * need
+    n_new = e_new / float(m.capex_issue_price)
+    scale = n0 / (n0 + n_new)
+    c = (base + e_new) * scale
+    full = (ops + e_new) * scale
+    return {"A": a, "B": b, "C": c, "ops": ops, "full": full, "need": need, "new_shares": n_new}
+
+
+def capex_joint_equity(m: ModelInputs, shock: float | None = None) -> float:
+    return capex_components(m, shock)["full"]
+
+
+def full_at(m: ModelInputs, sheet: str, shock: float) -> float:
+    """Independent FULL equity for `sheet` at an arbitrary shock in that sheet's units (bp for rates)."""
+    if sheet == "Event_Rates":
+        return rates_joint_equity(m, shock)
+    if sheet == "Event_Commodity":
+        return commodity_joint_equity(m, shock)
+    if sheet == "Event_Tariff":
+        return tariff_joint_equity(m, shock)
+    if sheet == "Event_Capex":
+        return capex_joint_equity(m, shock)
+    raise ValueError(sheet)
+
+
+def configured_shock(m: ModelInputs, sheet: str) -> float:
+    return {
+        "Event_Rates": m.rate_shock_bp,
+        "Event_Commodity": m.commodity_shock,
+        "Event_Tariff": m.tariff_cost_shock,
+        "Event_Capex": m.capex_shock,
+    }[sheet]
 
 
 def blended_proxy(full_equity: float, m: ModelInputs) -> float:
@@ -320,6 +430,8 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
     wb_blend = wb["DCF"]["B30"].value
     wb_rates = wb["Event_Rates"]["D11"].value
     wb_second = wb[second_sheet]["D11"].value
+    has_capex = "Event_Capex" in wb.sheetnames
+    wb_capex = wb["Event_Capex"]["D11"].value if has_capex else None
     wb_env_lo = wb["Envelope"]["B9"].value
     wb_env_hi = wb["Envelope"]["B10"].value
     wb_env_lo_sh = wb["Envelope"]["C9"].value
@@ -376,12 +488,24 @@ def reconcile_events(path, second_sheet: str, tol_rel: float = 1e-4, tol_abs: fl
     else:
         details.append(f"{key} FULL reconciliation OK")
 
-    # Independent blended proxies for envelope
+    if has_capex:
+        ind["capex"] = capex_joint_equity(m)
+        details.append(f"capex FULL ref={ind['capex']:.6f} workbook={wb_capex}")
+        if wb_capex is None or abs(ind["capex"] - float(wb_capex)) > max(
+            tol_abs, abs(float(wb_capex)) * tol_rel
+        ):
+            failures.append(f"capex FULL reconciliation: ref {ind['capex']} != workbook {wb_capex}")
+        else:
+            details.append("capex FULL reconciliation OK")
+
+    # Independent blended proxies for envelope (every enabled event)
     proxies = {
         "base": ref_blend,
         "rates": blended_proxy(ind["rates"], m),
         key: blended_proxy(ind[key], m),
     }
+    if has_capex:
+        proxies["capex"] = blended_proxy(ind["capex"], m)
     ind_env_lo = min(proxies.values())
     ind_env_hi = max(proxies.values())
     details.append(

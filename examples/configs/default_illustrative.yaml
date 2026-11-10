@@ -64,6 +64,8 @@ checks:
     - Tornado!C5
     - Envelope!B9
     - Football!B8
+    - Summary!D14
+    - Summary!D15
   - name: risk_free_rate
     sheet: Inputs
     cell: B21
