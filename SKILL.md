@@ -37,6 +37,7 @@ Each event sheet already shows the shock and its mirror (the same size, opposite
 - **Lead with the downside / upside ratio** = |change in value per share from the adverse case| ÷ |change from the favourable case|. A ratio well above 1 means the stock loses more than it gains from the same-sized move.
 - **Name the channel behind it:** operating leverage on fixed costs, a royalty or tax step, debt that amplifies equity moves, or a dominant terminal value.
 - **Don't read a zero interaction row as "linear".** The interaction row measures how channels *combine* at one shock size. A shock can still hurt more than proportionally as it grows, for example through the convexity of value in the weighted average cost of capital (WACC). Use the mirror and, where built, a multi-size shock ladder to see that curve.
+- **Commodity events are linear by construction in this generator.** Every channel scales in proportion to price, so the +x% and −x% cases mirror exactly. Floors on equity, untaxed losses and shutting high-cost output are not modelled yet, so don't claim commodity non-linearity from this workbook.
 
 ## Reverse stress test
 
