@@ -36,7 +36,7 @@ Terms: DCF = discounted cash flow. Capex = capital expenditure. PV = present val
 
 ## Case 2 — Illustrative specialty apparel retailer (“Harbor Lane Apparel”, ILLUSTRATIVE)
 
-**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC about 8% (no override); terminal growth 2.5%; exit multiple 9× EBITDA. Config: [configs/apparel_retailer.yaml](configs/apparel_retailer.yaml). The workbook also has a blue net debt / Year-1 EBITDA covenant limit of 0.35× (ILLUSTRATIVE).
+**Setup (illustrative).** Revenue $800 million; gross margin 55%; store occupancy largely fixed; online mix 35%; net debt $80 million; diluted shares 40 million; WACC about 8% (no override); terminal growth 2.5%; exit multiple 9× EBITDA. Config: [configs/apparel_retailer.yaml](configs/apparel_retailer.yaml). The workbook also has a blue net debt / Year-1 EBITDA covenant limit of 0.35×, labelled ILLUSTRATIVE, replace with your own loan limit. A real covenant limit comes from the company's loan agreement; the yellow source cell ships as `TO FILL: cite the loan agreement clause`.
 
 **Shocks run (each in its own table):**
 

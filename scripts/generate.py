@@ -257,9 +257,11 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     ws["C50"] = "EBIT = earnings before interest and tax; for display only"
 
     section(51, "Debt covenant (diagnostic, outside FULL and the blend)")
-    put(52, "Net debt / Year-1 EBITDA covenant limit (blank = n/a)", inp.get("covenant_nd_ebitda_limit"), "0.00",
+    put(52, "Net debt / Year-1 EBITDA covenant limit (blank = n/a) — ILLUSTRATIVE, replace with your own loan limit",
+        inp.get("covenant_nd_ebitda_limit"), "0.00",
         "EBITDA = earnings before interest, tax, depreciation and amortisation = EBIT + D&A. "
-        "Compared on each event sheet next to the mirror. Blank = not applicable.")
+        "Compared on each event sheet next to the mirror. Blank = not applicable. "
+        "ILLUSTRATIVE, replace with your own loan limit. A real covenant limit comes from the company's loan agreement.")
     ws["A53"] = "Base Year-1 EBITDA (EBIT + D&A)"
     ws["B53"] = "=DCF!B8+DCF!B11"
     ws["B53"].number_format = "#,##0.0"
@@ -272,6 +274,14 @@ def build_workbook(cfg: dict[str, Any]) -> Workbook:
     style_formula(ws["B54"])
     ws["C54"] = "For display only; the event-sheet covenant row uses the shocked net debt and Year-1 EBITDA."
     ws["C54"].font = MUTED
+    ws["A55"] = "Covenant limit source (loan agreement)"
+    ws["B55"] = "TO FILL: cite the loan agreement clause"
+    style_judgment(ws["B55"])
+    ws["C55"] = (
+        "A real covenant limit comes from the company's loan agreement. "
+        "Cite the clause; never invent a limit. This cell ships as TO FILL."
+    )
+    ws["C55"].font = MUTED
 
     set_widths(ws, [62, 14, 72])
 
@@ -1442,6 +1452,8 @@ def _add_covenant_row(ws, sheet: str, shock: str) -> None:
         "Covenant columns I–M are diagnostic and sit outside FULL and the blend. "
         "EBITDA = EBIT + D&A, with EBIT = revenue − opex − royalty; opex already includes D&A, which is added back. "
         "Year-1 EBITDA is used. A blank limit is n/a. A non-positive EBITDA, or a ratio above the limit, is BREACH. "
+        "The limit on Inputs is ILLUSTRATIVE, replace with your own loan limit; a real covenant limit comes from "
+        "the company's loan agreement (source cell: TO FILL: cite the loan agreement clause). "
         "The inventory overlay on Event_Demand is inside FCFF and does not restate t0 net debt."
     )
     ws[f"A{ROW_COV_NOTE}"].font = MUTED
@@ -2393,7 +2405,7 @@ def _build_summary(wb: Workbook, event_list) -> None:
         "Down-case / up-case = lower / higher of the configured and mirrored FULL proxies. Reverse-stress result = "
         "smallest tested shock that takes the FULL proxy $/sh below the yellow threshold on that event sheet "
         "(default threshold = base × (1 − 25%); n/a when the drop % or threshold is blank). Ranking uses the LARGE and INDEX/MATCH spreadsheet functions (Excel and LibreOffice). "
-        "The covenant columns compare net debt / Year-1 EBITDA (earnings before interest, tax, depreciation and amortisation = EBIT + D&A) with the limit on Inputs; blank limit = n/a. Outside the blend."
+        "The covenant columns compare net debt / Year-1 EBITDA (earnings before interest, tax, depreciation and amortisation = EBIT + D&A) with the limit on Inputs (ILLUSTRATIVE, replace with your own loan limit; a real covenant limit comes from the company's loan agreement — source cell TO FILL: cite the loan agreement clause); blank limit = n/a. Outside the blend."
     )
     sm[f"A{foot + 1}"].font = MUTED
     sm[f"A{foot + 1}"].alignment = Alignment(wrap_text=True)
@@ -2531,7 +2543,7 @@ def _build_how_measured(wb: Workbook, event_list) -> None:
         "%Δ (percentage change): each FULL versus its own perpetual-growth method base, then × blended mid → blended-mid sensitivity proxy.",
         "Cross-channel interaction (not size non-linearity) — row 12 on each event sheet, labelled INT, diagnostic: FULL − sum of the standalone channel rows, as a change in $m and $/sh. It shows how the channels combine at one shock size; it is outside FULL and outside the blend. A zero interaction does NOT mean the value response is linear in shock size: read the mirror and asymmetry rows 61–63 for that and the Ladder sheet. On Event_Tariff the B–D rows are a sequential ladder, so INT isolates the cross-effect of sourcing mitigation with the other channels.",
         "Up / down mirror (rows 60–63): the same event at the configured shock and at the mirrored shock (opposite sign). Asymmetry = (configured − base) + (mirrored − base); 0 means symmetric at this size.",
-        "Covenant row (columns I–M of the mirror rows, and on the Summary): net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. This is a diagnostic, outside FULL and the blend. EBITDA = EBIT + D&A, matching the model's existing definition (DCF Year-5 EBITDA on DCF!B20 uses the same add-back; opex already includes D&A, which is added back so it is not subtracted twice). A non-positive EBITDA, or a ratio above the limit, is BREACH.",
+        "Covenant row (columns I–M of the mirror rows, and on the Summary): net debt / Year-1 EBITDA under the FULL shock and its mirror, versus a blue covenant-limit input on Inputs (blank = n/a), with a PASS / BREACH / n/a flag. The Inputs limit is labelled ILLUSTRATIVE, replace with your own loan limit; a real covenant limit comes from the company's loan agreement, and its source cell ships as TO FILL: cite the loan agreement clause. This is a diagnostic, outside FULL and the blend. EBITDA = EBIT + D&A, matching the model's existing definition (DCF Year-5 EBITDA on DCF!B20 uses the same add-back; opex already includes D&A, which is added back so it is not subtracted twice). A non-positive EBITDA, or a ratio above the limit, is BREACH.",
         "Reverse stress test (rows 65–76): an 8-step formula grid of shock multiples (blue inputs, ascending) in the configured direction. The result cell reports the smallest tested shock whose FULL proxy $/sh falls below the yellow threshold. The threshold defaults to a live formula = base blended-mid $/sh × (1 − drop %), with the drop % a separate yellow input (default 25%); a blank drop % (or threshold) → n/a; typing a $/sh level over the threshold overrides the default. If no tested shock breaks the threshold, the cell reads 'Not reached: worst is -X% at …' with the worst fall and shock on the grid. No goal seek, no macros.",
         "Shock calibration (rows 54–58): yellow source, basis and severity cells for each shock size (for example a historical 1-year 95th percentile move, labelled plausible, severe or extreme). Shipped as TO FILL; never invent a statistic.",
         "Ladder sheet: each event's FULL re-run at yellow multiples of its configured shock (default −1.5× to +1.5×), both directions, via helper rows 90–97 on each event sheet. Asymmetry per rung = (proxy at +k − base) + (proxy at −k − base); the ±1× rung must equal the mirror asymmetry (row 63) and the Summary, with a check cell. The reverse stress test there interpolates the shock that cuts FULL equity by each yellow % target; scripts/reverse_stress.py solves it exactly.",

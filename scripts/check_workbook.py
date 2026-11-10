@@ -1600,6 +1600,35 @@ def calibration_messages(to_fill: list[tuple[str, str, str]], strict: bool) -> t
     return [msg + " Use --strict-calibration to make this a FAIL."], []
 
 
+ROW_COV_SOURCE = 55
+COVENANT_SOURCE_PLACEHOLDER = "TO FILL: cite the loan agreement clause"
+
+
+def covenant_source_messages(path: Path, strict: bool) -> tuple[list[str], list[str]]:
+    """Inputs!B55 source for the covenant limit: empty FAILs; TO FILL is a WARNING, or FAIL if strict."""
+    wb = load_workbook(path, data_only=False)
+    if "Inputs" not in wb.sheetnames:
+        wb.close()
+        return [], ["Covenant limit source: Inputs sheet missing"]
+    v = wb["Inputs"][f"B{ROW_COV_SOURCE}"].value
+    wb.close()
+    if v is None or str(v).strip() == "":
+        return [], [
+            f"Covenant limit source: Inputs!B{ROW_COV_SOURCE} is empty — "
+            f"write {COVENANT_SOURCE_PLACEHOLDER!r} or cite the loan agreement clause"
+        ]
+    if str(v).upper().startswith("TO FILL"):
+        msg = (
+            f"Covenant limit source still TO FILL (Inputs!B{ROW_COV_SOURCE}). "
+            "A real covenant limit comes from the company's loan agreement; "
+            "cite the clause before a real-issuer CLEAR."
+        )
+        if strict:
+            return [], [msg + " [--strict-calibration]"]
+        return [msg + " Use --strict-calibration to make this a FAIL."], []
+    return [], []
+
+
 
 def verify_ladder_structure(path: Path) -> tuple[list[str], list[str]]:
     """Ladder outputs must be live formulas, and each chart must plot FULL equity (D) against shock size (C)."""
@@ -2045,6 +2074,10 @@ def main_check(
         details.extend(ex_detail)
         manual.extend(ex_manual)
         cal_warn, cal_fail = calibration_messages(to_fill, strict_calibration)
+
+        cov_warn, cov_fail = covenant_source_messages(workbook, strict_calibration)
+        cal_warn = cal_warn + cov_warn
+        cal_fail = cal_fail + cov_fail
         warnings.extend(cal_warn)
         failures.extend(cal_fail)
 

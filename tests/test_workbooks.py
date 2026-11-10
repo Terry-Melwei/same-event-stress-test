@@ -132,6 +132,8 @@ def test_checker_passes_on_shipped(name):
     sheets = _event_sheets(openpyxl.load_workbook(CASES[name], read_only=True))
     for sheet in sheets:
         assert f"{sheet} (source + basis + severity)" in warn[0]
+    cov_warn = [ln for ln in res.stdout.splitlines() if "Covenant limit source still TO FILL" in ln]
+    assert len(cov_warn) == 1, res.stdout
 
 
 def _check(path, name, *flags):
@@ -145,12 +147,13 @@ def test_strict_calibration(recalculated, tmp_path):
     rc, out = _check(CASES[name], name, "--strict-calibration")
     assert rc != 0 and "[--strict-calibration]" in out, out
     assert "WARNING: Calibration" not in out
-    # Filled source/basis on every event sheet -> strict PASS, no warning
+    # Filled source/basis on every event sheet, and the covenant limit source -> strict PASS, no warning
     wb = openpyxl.load_workbook(recalculated[name])
     for sheet in _event_sheets(wb):
         wb[sheet]["B56"] = "ILLUSTRATIVE test source, 2026-11-10"
         wb[sheet]["B57"] = "ILLUSTRATIVE test basis"
         wb[sheet]["B58"] = "plausible"
+    wb["Inputs"]["B55"] = "ILLUSTRATIVE test: loan agreement clause 12.1"
     filled = tmp_path / "filled.xlsx"
     wb.save(filled)
     filled = _recalc(filled, tmp_path / "filled_out")
@@ -402,6 +405,8 @@ def test_covenant_row_matches_reference(recalculated):
         # apparel: the 0.35x limit should be tight enough that demand breaches and the base-like rates case passes
         if name == "apparel_retailer":
             assert wb["Inputs"]["B52"].value == pytest.approx(0.35)
+            assert "ILLUSTRATIVE, replace with your own loan limit" in str(wb["Inputs"]["A52"].value or "")
+            assert str(wb["Inputs"]["B55"].value or "").startswith("TO FILL: cite the loan agreement clause")
             assert wb["Event_Demand"]["M61"].value == "BREACH"
             assert wb["Event_Rates"]["M61"].value == "PASS"
             assert "BREACH" in [wb["Summary"][f"M{5 + k}"].value for k in range(len(sheets))]
