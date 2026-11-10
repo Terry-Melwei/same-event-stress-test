@@ -74,7 +74,7 @@
           "type": "number",
           "minimum": 0,
           "maximum": 1,
-          "description": "Operating expenses (excluding royalty) as % of revenue. INCLUDES depreciation and amortisation (D&A): EBIT = revenue − opex − royalty, and free cash flow to the firm (FCFF) adds D&A back."
+          "description": "Operating expenses (excluding royalty) as % of revenue. INCLUDES depreciation and amortisation (D&A): EBIT = revenue \u2212 opex \u2212 royalty, and free cash flow to the firm (FCFF) adds D&A back."
         },
         "tax_rate": {
           "type": "number",
@@ -155,6 +155,13 @@
         },
         "capex_price_elasticity": {
           "type": "number"
+        },
+        "covenant_nd_ebitda_limit": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Optional maximum net debt / Year-1 EBITDA (earnings before interest, tax, depreciation and amortisation) covenant. Blank/null = not applicable. Shown on every event sheet next to the mirror and on the Summary, outside FULL and the blend. EBITDA = EBIT + D&A, with EBIT = revenue \u2212 opex \u2212 royalty; opex already includes D&A."
         }
       }
     },
@@ -176,6 +183,12 @@
         },
         "capex": {
           "$ref": "#/$defs/capexEventSpec"
+        },
+        "fx": {
+          "$ref": "#/$defs/fxEventSpec"
+        },
+        "demand": {
+          "$ref": "#/$defs/demandEventSpec"
         }
       }
     },
@@ -482,7 +495,7 @@
             "number",
             "null"
           ],
-          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base × (1 − threshold_drop_pct)). Null/absent = use the default formula."
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base \u00d7 (1 \u2212 threshold_drop_pct)). Null/absent = use the default formula."
         },
         "calibration_source": {
           "type": "string",
@@ -509,7 +522,11 @@
           ],
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 1,
-          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank → reverse-stress result n/a."
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank \u2192 reverse-stress result n/a."
+        },
+        "calibration_severity": {
+          "type": "string",
+          "description": "Severity label: plausible, severe or extreme (or TO FILL: severity). Default 'TO FILL: severity'."
         }
       }
     },
@@ -531,7 +548,7 @@
             "number",
             "null"
           ],
-          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base × (1 − threshold_drop_pct)). Null/absent = use the default formula."
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base \u00d7 (1 \u2212 threshold_drop_pct)). Null/absent = use the default formula."
         },
         "calibration_source": {
           "type": "string",
@@ -577,7 +594,11 @@
           ],
           "exclusiveMinimum": 0,
           "exclusiveMaximum": 1,
-          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank → reverse-stress result n/a."
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank \u2192 reverse-stress result n/a."
+        },
+        "calibration_severity": {
+          "type": "string",
+          "description": "Severity label: plausible, severe or extreme (or TO FILL: severity). Default 'TO FILL: severity'."
         }
       },
       "if": {
@@ -594,6 +615,192 @@
           "own_capex_response",
           "equity_funding_share",
           "issue_price_per_share",
+          "label"
+        ]
+      }
+    },
+    "fxEventSpec": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "threshold_value_per_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base \u00d7 (1 \u2212 threshold_drop_pct)). Null/absent = use the default formula."
+        },
+        "calibration_source": {
+          "type": "string",
+          "description": "Source and date of the shock size. Default 'TO FILL: source'. Never invent a statistic."
+        },
+        "calibration_basis": {
+          "type": "string",
+          "description": "Basis of the shock size, e.g. historical 1-year 95th percentile move. Default 'TO FILL: basis'."
+        },
+        "calibration_severity": {
+          "type": "string",
+          "description": "Severity label: plausible, severe or extreme (or TO FILL: severity). Default 'TO FILL: severity'."
+        },
+        "reverse_stress_multiples": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "8 ascending multiples of the configured shock for the reverse stress grid."
+        },
+        "threshold_drop_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank \u2192 reverse-stress result n/a."
+        },
+        "fx_shock_pct": {
+          "type": "number",
+          "description": "Home-currency appreciation (enter the adverse direction; a positive value means the home currency strengthens)."
+        },
+        "foreign_revenue_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of revenue earned in foreign currency."
+        },
+        "foreign_cost_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of operating costs denominated in foreign currency (natural hedge)."
+        },
+        "fx_debt_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of gross debt denominated in foreign currency (remeasured in the net-debt bridge)."
+        },
+        "hedge_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of foreign-currency revenue covered by financial hedges (forwards). Counted once, with the natural cost offset."
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "fx_shock_pct",
+          "foreign_revenue_share",
+          "foreign_cost_share",
+          "fx_debt_share",
+          "hedge_ratio",
+          "label"
+        ]
+      }
+    },
+    "demandEventSpec": {
+      "type": "object",
+      "required": [
+        "enabled"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "label": {
+          "type": "string"
+        },
+        "threshold_value_per_share": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "Optional typed reverse-stress threshold in $/sh (blended-mid proxy). Overrides the default formula (base \u00d7 (1 \u2212 threshold_drop_pct)). Null/absent = use the default formula."
+        },
+        "calibration_source": {
+          "type": "string",
+          "description": "Source and date of the shock size. Default 'TO FILL: source'. Never invent a statistic."
+        },
+        "calibration_basis": {
+          "type": "string",
+          "description": "Basis of the shock size, e.g. historical 1-year 95th percentile move. Default 'TO FILL: basis'."
+        },
+        "calibration_severity": {
+          "type": "string",
+          "description": "Severity label: plausible, severe or extreme (or TO FILL: severity). Default 'TO FILL: severity'."
+        },
+        "reverse_stress_multiples": {
+          "type": "array",
+          "minItems": 8,
+          "maxItems": 8,
+          "items": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "description": "8 ascending multiples of the configured shock for the reverse stress grid."
+        },
+        "threshold_drop_pct": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "exclusiveMinimum": 0,
+          "exclusiveMaximum": 1,
+          "description": "Drop below base value per share that defines the default reverse-stress threshold (yellow input). Absent = 0.25 (25%); null = blank \u2192 reverse-stress result n/a."
+        },
+        "volume_shock_pct": {
+          "type": "number",
+          "description": "Demand / volume shock (enter the adverse direction, typically negative)."
+        },
+        "price_mix_elasticity": {
+          "type": "number",
+          "description": "Price/mix % change per 1.0 volume % change. Positive means price/mix moves with volume (a volume fall also weakens mix)."
+        },
+        "fixed_cost_share": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Share of opex (operating expenses, including D&A) that does not move with volume."
+        },
+        "inventory_to_sales": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Inventory-to-sales ratio used for the Year-1 downside-only inventory cash use (volume fall only)."
+        }
+      },
+      "if": {
+        "properties": {
+          "enabled": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "required": [
+          "volume_shock_pct",
+          "price_mix_elasticity",
+          "fixed_cost_share",
+          "inventory_to_sales",
           "label"
         ]
       }

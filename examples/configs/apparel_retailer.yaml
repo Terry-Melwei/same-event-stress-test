@@ -33,6 +33,7 @@ inputs:
   base_buyback_cash: 15.0
   cost_elasticity: 0.0
   capex_price_elasticity: 0.0
+  covenant_nd_ebitda_limit: 0.35
 
 events:
   rates:
@@ -44,6 +45,21 @@ events:
   tariff:
     enabled: true
     label: "Tariff / input-cost FULL"
+  fx:
+    enabled: true
+    label: "Home-currency FX +10% FULL"
+    fx_shock_pct: 0.10
+    foreign_revenue_share: 0.40
+    foreign_cost_share: 0.15
+    fx_debt_share: 0.30
+    hedge_ratio: 0.25
+  demand:
+    enabled: true
+    label: "Consumer demand −15% FULL"
+    volume_shock_pct: -0.15
+    price_mix_elasticity: 0.20
+    fixed_cost_share: 0.40
+    inventory_to_sales: 0.10
 
 tariff:
   units: 20.0                 # 20 × $40 ≈ $800m revenue year-0
@@ -82,6 +98,10 @@ checks:
         - "Football!B8"
         - "Summary!D14"
         - "Summary!D15"
+        - "Event_FX!D11"
+        - "Event_Demand!D11"
+        - "Summary!D16"
+        - "Summary!D17"
     - name: "risk_free_rate"
       sheet: Inputs
       cell: B21
